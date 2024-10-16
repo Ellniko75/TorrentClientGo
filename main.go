@@ -13,20 +13,14 @@ import (
 	"github.com/jackpal/bencode-go"
 )
 
-type TorrentFile struct {
-	Announce string `bencode:"announce"`
-	Info     struct {
-		Pieces      string `bencode:"pieces"`
-		PieceLength int    `bencode:"piece length"`
-	} `bencode:"info"`
-	AnnounceList [][]string `bencode:"announce-list"` // Optional multiple trackers
-}
-
-type TorrentFileToBuild struct {
-	ListOfTrackers []string //list of all the trackers
-	ListOfHashes   [][]byte //hashes for each piece of the file
-	File           []byte   //property to write the file when the pieces arrive
-}
+var Red = "\033[31m"
+var Green = "\033[32m"
+var Yellow = "\033[33m"
+var Blue = "\033[34m"
+var Magenta = "\033[35m"
+var Cyan = "\033[36m"
+var Gray = "\033[37m"
+var White = "\033[97m"
 
 func main() {
 	file, err := os.Open("./db.torrent")
@@ -36,20 +30,17 @@ func main() {
 	}
 
 	var torrent TorrentFile
-
 	err = bencode.Unmarshal(file, &torrent)
-
 	if err != nil {
 		log.Println("Error on unmarshaling")
 	}
 
 	TorrentFileToBuild := TorrentFileToBuild{}
-
 	loadHashes(&torrent, &TorrentFileToBuild)
 	loadTrackers(&torrent, &TorrentFileToBuild)
 	requestPieces(&TorrentFileToBuild)
-
 }
+
 func generatePeerID() string {
 	peerID := "-GO0001-" + randomString(12)
 	return peerID
@@ -69,8 +60,8 @@ func requestPieces(torrentToBuild *TorrentFileToBuild) {
 	for _, hash := range torrentToBuild.ListOfHashes {
 		for _, tracker := range torrentToBuild.ListOfTrackers {
 			if tracker[:3] == "udp" {
-				fmt.Println(hash[0])
 				trackerURL := strings.TrimPrefix(tracker, "udp://") //you need to strip the udp:// from the tracker to resolve the address later
+				trackerURL = strings.TrimSuffix(trackerURL, "/announce")
 				transactionID := int32(12345)
 
 				// Resolve UDP address
@@ -79,25 +70,59 @@ func requestPieces(torrentToBuild *TorrentFileToBuild) {
 					fmt.Println("Error resolving address:", err)
 					return
 				}
-				// Dial UDP connection
+				// Create UDP connection
 				conn, err := net.DialUDP("udp", nil, addr)
 				if err != nil {
 					fmt.Println("Error creating UDP connection:", err)
 					return
 				}
-				timeoutDuration := 1 * time.Second
+				//Add a timeout for the connection
+				timeoutDuration := 10 * time.Second
 				conn.SetDeadline(time.Now().Add(timeoutDuration))
 
-				requestToUDPTracker(conn, transactionID)
+				//Request to UDP TRACKER and read the response
+				initiateUdpConnection(conn, transactionID)
 				response := make([]byte, 16)
-				conn.ReadFromUDP(response)
-
+				n, _, err := conn.ReadFromUDP(response)
+				if err != nil {
+					log.Println("ERROR ON TRYING TO CONNECT TO UDP TRACKER")
+				}
+				//Get the transaction ID and connectionID from the response
 				transactionIDResponse := binary.BigEndian.Uint32(response[4:8])
-				connectionIDResponse := binary.BigEndian.Uint32(response[8:16])
+				connectionIDResponse := binary.BigEndian.Uint64(response[8:16])
 
-				fmt.Println("Transaction ID: ", transactionIDResponse, " Connection ID: ", connectionIDResponse)
+				scrapeIpsFromTracker(conn, hash, connectionIDResponse, transactionIDResponse, generatePeerID())
+				trackerAnnounceResponse := make([]byte, 1024)
+				n, _, err = conn.ReadFrom(trackerAnnounceResponse)
 
-				fmt.Println(response)
+				if err != nil {
+					log.Println("ERROR ON READING ANNOUNCE RESPONSE")
+				}
+				responseAction := binary.BigEndian.Uint32(trackerAnnounceResponse[:4])
+				responseTransaction := binary.BigEndian.Uint32(trackerAnnounceResponse[4:8])
+				interval := binary.BigEndian.Uint32(trackerAnnounceResponse[8:12])
+				leechers := binary.BigEndian.Uint32(trackerAnnounceResponse[12:16])
+				seeders := binary.BigEndian.Uint32(trackerAnnounceResponse[16:20])
+
+				if responseAction == 3 {
+					toStr := string(trackerAnnounceResponse[8:])
+					printWithColor(Red, fmt.Sprint("ERROR: ", toStr))
+					printWithColor(Blue, "---------------------------------")
+					continue
+				}
+
+				printWithColor(Blue, "---------------------------------")
+				printWithColor(Green, fmt.Sprint("Current tracker: ", trackerURL))
+				printWithColor(Green, fmt.Sprint("Bytes totales: ", n))
+				printWithColor(Green, fmt.Sprint("Action> ", responseAction))
+				printWithColor(Green, fmt.Sprint("transaction> ", responseTransaction))
+				printWithColor(Green, fmt.Sprint("Interval> ", interval))
+				printWithColor(Green, fmt.Sprint("Leechers> ", leechers))
+				printWithColor(Green, fmt.Sprint("Seeders> ", seeders))
+				printWithColor(Blue, "---------------------------------")
+
+				//fmt.Println("IPS > ", binary.BigEndian.Uint32(trackerAnnounceResponse[20:]))
+
 				conn.Close()
 
 			}
@@ -137,7 +162,8 @@ func loadTrackers(torrentInfo *TorrentFile, toBuild *TorrentFileToBuild) {
 	}
 }
 
-func requestToUDPTracker(conn *net.UDPConn, transactionID int32) {
+// this returns the connectionID and transactionID so that we can start getting the IPs of people who have the file
+func initiateUdpConnection(conn *net.UDPConn, transactionID int32) {
 	// Construct a connect request (binary format)
 	var buf bytes.Buffer
 	// Magic constant for connect request: 0x41727101980
@@ -145,7 +171,6 @@ func requestToUDPTracker(conn *net.UDPConn, transactionID int32) {
 	// Action: 0 (for connect request)
 	binary.Write(&buf, binary.BigEndian, int32(0))
 	// Transaction ID: Random (e.g., 12345)
-
 	binary.Write(&buf, binary.BigEndian, transactionID)
 
 	// Send the request
@@ -155,4 +180,48 @@ func requestToUDPTracker(conn *net.UDPConn, transactionID int32) {
 		return
 	}
 	fmt.Println("Connect request sent.")
+}
+func scrapeIpsFromTracker(conn *net.UDPConn, hash []byte, connectionId uint64, transactionID uint32, peerID string) {
+	if len(peerID) != 20 {
+		log.Println("PEER ID MUST BE OF 20 BYTES")
+	}
+	if len(hash) != 20 {
+		log.Println("hash is not 20 bytes long")
+	}
+	var buf bytes.Buffer
+
+	//connectionID 8 bytes
+	binary.Write(&buf, binary.BigEndian, connectionId)
+	//action 4 bytes
+	binary.Write(&buf, binary.BigEndian, uint32(1))
+	//transaction id 4 bytes
+	binary.Write(&buf, binary.BigEndian, transactionID)
+	//hash piece 20 bytes
+	binary.Write(&buf, binary.BigEndian, hash)
+	//Peer ID 20 bytes
+	binary.Write(&buf, binary.BigEndian, peerID)
+	//Downloaded 8 bytes
+	binary.Write(&buf, binary.BigEndian, uint64(0))
+	//Left 8 bytes
+	binary.Write(&buf, binary.BigEndian, uint64(0))
+	//Uploaded 8 bytes
+	binary.Write(&buf, binary.BigEndian, uint64(0))
+	//Event 4 bytes
+	binary.Write(&buf, binary.BigEndian, uint32(0))
+	//IP address 4 bytes
+	binary.Write(&buf, binary.BigEndian, uint32(0))
+	//key 4 bytes
+	binary.Write(&buf, binary.BigEndian, uint32(44315690))
+	//Number of peers you want 4 bytes
+	binary.Write(&buf, binary.BigEndian, int32(-1))
+	//port for listening to peer connections 2 bytes
+	binary.Write(&buf, binary.BigEndian, uint16(6881))
+
+	// Send the request
+	_, err := conn.Write(buf.Bytes())
+	if err != nil {
+		fmt.Println("Error sending Announce request:", err)
+		return
+	}
+	fmt.Println("Anounce Sent")
 }

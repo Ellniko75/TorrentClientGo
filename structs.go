@@ -10,7 +10,12 @@ type TorrentFile struct {
 }
 
 type TorrentFileToBuild struct {
-	ListOfTrackers []string //list of all the trackers
-	ListOfHashes   [][]byte //hashes for each piece of the file
-	File           []byte   //property to write the file when the pieces arrive
+	ListOfTrackers []string   //list of all the trackers
+	ListOfHashes   [][20]byte //hashes for each piece of the file
+	File           []byte     //property to write the file when the pieces arrive
+}
+
+type Error struct {
+	FunctionName string
+	ErrorName    string
 }

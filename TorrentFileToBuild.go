@@ -1,23 +1,12 @@
 package main
 
 import (
-	"encoding/binary"
 	"fmt"
 	"log"
 	"math/rand"
 	"strings"
 	"time"
 )
-
-// serves to unmarshal the torrent data
-type TorrentFileInfo struct {
-	Announce string `bencode:"announce"`
-	Info     struct {
-		Pieces      string `bencode:"pieces"`
-		PieceLength int    `bencode:"piece length"`
-	} `bencode:"info"`
-	AnnounceList [][]string `bencode:"announce-list"` // Optional multiple trackers
-}
 
 // contains all the info and functions necessary to download the file
 type TorrentFileToBuild struct {
@@ -62,7 +51,7 @@ func (this *TorrentFileToBuild) downloadPieces() {
 				}
 
 				//Add a timeout for the connection
-				timeoutDuration := 15 * time.Second
+				timeoutDuration := 3 * time.Second
 				conn.SetDeadline(time.Now().Add(timeoutDuration))
 
 				//Create random transaction ID
@@ -81,39 +70,24 @@ func (this *TorrentFileToBuild) downloadPieces() {
 					continue
 				}
 				//GET ALL THE PEERS THAT HAVE THE FILE
-				trackerAnnounceResponse, bytesRead, err := scrapeIpsFromTracker(
+				trackerAnnounceResponse, _, err := scrapeIpsFromTracker(
 					conn,
 					hash,
 					connectionIDResponse,
 					transactionIDResponse,
 					peerID)
-
 				if err != nil {
 					printWithColor(Red, err.Error())
 					continue
 				}
-
-				//Get all the information from the tracker response
-				responseAction := binary.BigEndian.Uint32(trackerAnnounceResponse[:4])
-				responseTransaction := binary.BigEndian.Uint32(trackerAnnounceResponse[4:8])
-				interval := binary.BigEndian.Uint32(trackerAnnounceResponse[8:12])
-				leechers := binary.BigEndian.Uint32(trackerAnnounceResponse[12:16])
-				seeders := binary.BigEndian.Uint32(trackerAnnounceResponse[16:20])
-				printWithColor(Blue, "---------------------------------")
-				printWithColor(Green, fmt.Sprint("Current tracker > ", trackerURL))
-				printWithColor(Green, fmt.Sprint("Bytes totales >", bytesRead))
-				printWithColor(Green, fmt.Sprint("Action> ", responseAction))
-				printWithColor(Green, fmt.Sprint("transaction> ", responseTransaction))
-				printWithColor(Green, fmt.Sprint("Interval> ", interval))
-				printWithColor(Green, fmt.Sprint("Leechers> ", leechers))
-				printWithColor(Green, fmt.Sprint("Seeders> ", seeders))
-				printWithColor(Blue, "---------------------------------")
+				TrackerResponseParsed := TrackerResponse{}
+				TrackerResponseParsed.Create(trackerAnnounceResponse)
+				TrackerResponseParsed.Print()
 
 				ipsAndPorts := trackerAnnounceResponse[20:]
 
 				//loop the seeders and request the file
-
-				for i := 0; i < int(seeders)*6; i = i + 6 {
+				for i := 0; i < int(TrackerResponseParsed.Seeders)*6; i = i + 6 {
 					first := ipsAndPorts[i]
 					second := ipsAndPorts[i+1]
 					third := ipsAndPorts[i+2]
@@ -122,7 +96,7 @@ func (this *TorrentFileToBuild) downloadPieces() {
 					portPart2 := ipsAndPorts[i+5]
 					ip := fmt.Sprint(first, ".", second, ".", third, ".", fourth, ":", portPart1, "", portPart2)
 
-					data, err := connectToPeerAndRequestFile(ip, fileIndex, this.FilesLength)
+					data, err := connectToPeerAndRequestFile(ip, fileIndex, hash, peerID)
 					if err != nil {
 						log.Println(err)
 					} else {
@@ -130,7 +104,6 @@ func (this *TorrentFileToBuild) downloadPieces() {
 					}
 
 				}
-
 				//CLOSE THE CONNECTION
 				conn.Close()
 			}
@@ -152,9 +125,4 @@ func (this *TorrentFileToBuild) downloadPieces() {
 			}*/
 
 	}
-}
-
-type Error struct {
-	FunctionName string
-	ErrorName    string
 }

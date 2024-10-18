@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 
 	"log"
 
@@ -22,8 +21,18 @@ var Cyan = "\033[36m"
 var Gray = "\033[37m"
 var White = "\033[97m"
 
+// serves to unmarshal the torrent data
+type TorrentFileInfo struct {
+	Announce string `bencode:"announce"`
+	Info     struct {
+		Pieces      string `bencode:"pieces"`
+		PieceLength int    `bencode:"piece length"`
+	} `bencode:"info"`
+	AnnounceList [][]string `bencode:"announce-list"` // Optional multiple trackers
+}
+
 func main() {
-	file, err := os.Open("./torrents/dandadan.torrent")
+	file, err := os.Open("./torrents/dandadan2.torrent")
 	defer file.Close()
 	if err != nil {
 		log.Println("error on reading file")
@@ -35,9 +44,6 @@ func main() {
 	if err != nil {
 		log.Println("Error on unmarshaling")
 	}
-
-	fmt.Println("LENGTH OF EACH PIECE: ", torrentInfo.Info.PieceLength)
-	fmt.Println("MAIN TRACKER: ", torrentInfo.Announce)
 
 	//torrent that will be constructed
 	TorrentFileToBuild := TorrentFileToBuild{}

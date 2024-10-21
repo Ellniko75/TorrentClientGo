@@ -138,7 +138,7 @@ func scrapeIpsFromTracker(conn *net.UDPConn, hash []byte, connectionId uint64, t
 	}
 	fmt.Println("Anounce Sent")
 
-	trackerAnnounceResponse := make([]byte, 1024)
+	trackerAnnounceResponse := make([]byte, 50000)
 	bytesRead, _, err := conn.ReadFrom(trackerAnnounceResponse)
 	if err != nil {
 		return nil, bytesRead, createError(currentFunctionName, err.Error())

@@ -53,7 +53,7 @@ func main() {
 	TorrentFileToBuild := TorrentFileToBuild{}
 
 	//don't try to do this on a function, it destroys itself lmao
-	hexHash, err := getHexHash("xoka.torrent")
+	hexHash, err := getHexHash("db.torrent")
 	if err != nil {
 		log.Println(err)
 	}
@@ -66,7 +66,7 @@ func main() {
 	TorrentFileToBuild.loadHashes(&torrentInfo)
 	TorrentFileToBuild.loadTrackers(&torrentInfo)
 	TorrentFileToBuild.getPeers()
-	TorrentFileToBuild.downloadFile()
+	//TorrentFileToBuild.downloadFile()
 
 }
 func getHexHash(torrentName string) (string, error) {

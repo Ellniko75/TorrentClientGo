@@ -3,10 +3,10 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
-
+	"encoding/hex"
 	"log"
-
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/jackpal/bencode-go"
@@ -32,7 +32,11 @@ type TorrentFileInfo struct {
 }
 
 func main() {
-	file, err := os.Open("./torrents/dandadan2.torrent")
+	//go listenConnections()
+
+	time.Sleep(2 * time.Second)
+
+	file, err := os.Open("./torrents/xoka.torrent")
 	defer file.Close()
 	if err != nil {
 		log.Println("error on reading file")
@@ -47,17 +51,39 @@ func main() {
 
 	//torrent that will be constructed
 	TorrentFileToBuild := TorrentFileToBuild{}
+
+	//don't try to do this on a function, it destroys itself lmao
+	hexHash, err := getHexHash("xoka.torrent")
+	if err != nil {
+		log.Println(err)
+	}
+	hash, err := hex.DecodeString(hexHash)
+	if err != nil {
+		log.Println(err)
+	}
+
+	TorrentFileToBuild.loadInfoHash(hash)
 	TorrentFileToBuild.loadHashes(&torrentInfo)
 	TorrentFileToBuild.loadTrackers(&torrentInfo)
-	TorrentFileToBuild.downloadPieces()
+	TorrentFileToBuild.getPeers()
+	TorrentFileToBuild.downloadFile()
 
+}
+func getHexHash(torrentName string) (string, error) {
+	cmd := exec.Command("python", "PythonScripts/CalculateHash.py", torrentName)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	hexHash := string(output)
+	return hexHash, nil
 }
 
 func generatePeerID() ([20]byte, error) {
 
 	var peerId bytes.Buffer
 
-	firstPart := []byte("-GO0001-")
+	firstPart := []byte("-Go1234-")
 	restOfTheString := []byte(randomString(12))
 
 	if err := binary.Write(&peerId, binary.BigEndian, firstPart); err != nil {

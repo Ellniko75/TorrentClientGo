@@ -28,7 +28,7 @@ func createUdpConnection(url string) (*net.UDPConn, error) {
 	return conn, nil
 }
 
-// Returns TransactionID, ConnectionID, error
+// In charge of initiating the connection with the tracker, returns the connectionID needed for requesting peers. Returns TransactionID, ConnectionID, error.
 func initiateUdpConnection(conn *net.UDPConn, transactionID int32) (uint32, uint64, error) {
 	currentFunctionName := "initiateUdpConnection()"
 
@@ -67,13 +67,17 @@ func initiateUdpConnection(conn *net.UDPConn, transactionID int32) (uint32, uint
 	return transactionIDResponse, connectionIDResponse, nil
 }
 
-func scrapeIpsFromTracker(conn *net.UDPConn, hash [20]byte, connectionId uint64, transactionID uint32, peerID [20]byte) ([]byte, int, error) {
+func scrapeIpsFromTracker(conn *net.UDPConn, hash []byte, connectionId uint64, transactionID uint32, peerID [20]byte) ([]byte, int, error) {
 	currentFunctionName := "scrapeIpsFromTracker()"
 
+	if len(hash) != 20 {
+		log.Println("ERROR ON ", currentFunctionName, " THE HASH MUST BE OF 20 BYTES")
+	}
 	//CREATE THE PACKET TO SEND
 	var packet bytes.Buffer
 
 	//PACKET FORMAT
+	//64-bit integer	connection_id
 	//32-bit integer	action	1
 	//32-bit integer	transaction_id
 	//20-byte string	info_hash
@@ -102,7 +106,7 @@ func scrapeIpsFromTracker(conn *net.UDPConn, hash [20]byte, connectionId uint64,
 	if err := binary.Write(&packet, binary.BigEndian, peerID); err != nil {
 		log.Fatal("Error writing peerID:", err)
 	}
-	if err := binary.Write(&packet, binary.BigEndian, int64(0)); err != nil {
+	if err := binary.Write(&packet, binary.BigEndian, int64(200)); err != nil {
 		log.Fatal("Error writing downloaded:", err)
 	}
 	if err := binary.Write(&packet, binary.BigEndian, int64(0)); err != nil {
@@ -117,10 +121,10 @@ func scrapeIpsFromTracker(conn *net.UDPConn, hash [20]byte, connectionId uint64,
 	if err := binary.Write(&packet, binary.BigEndian, int32(0)); err != nil {
 		log.Fatal("Error writing IP address:", err)
 	}
-	if err := binary.Write(&packet, binary.BigEndian, int32(44315690)); err != nil {
+	if err := binary.Write(&packet, binary.BigEndian, int32(64375677)); err != nil {
 		log.Fatal("Error writing key:", err)
 	}
-	if err := binary.Write(&packet, binary.BigEndian, uint32(0xFFFFFFFF)); err != nil { // request unlimited peers
+	if err := binary.Write(&packet, binary.BigEndian, int32(-1)); err != nil { // request unlimited peers
 		log.Fatal("Error writing number of peers:", err)
 	}
 	if err := binary.Write(&packet, binary.BigEndian, int16(6881)); err != nil {
@@ -132,7 +136,6 @@ func scrapeIpsFromTracker(conn *net.UDPConn, hash [20]byte, connectionId uint64,
 	if err != nil {
 		return nil, 0, createError(currentFunctionName, err.Error())
 	}
-
 	fmt.Println("Anounce Sent")
 
 	trackerAnnounceResponse := make([]byte, 1024)

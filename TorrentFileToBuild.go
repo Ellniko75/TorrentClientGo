@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"math/rand"
 	"strings"
@@ -9,13 +10,17 @@ import (
 
 // contains all the info and functions necessary to download the file
 type TorrentFileToBuild struct {
-	ipsWithTheFile []string
-	FilesLength    int
+	PieceSize      int //size of each piece to download
+	TotalPieces    int
+	BlockLength    int
+	AmountOfBlocks int
+	ipsWithTheFile []string //slice of all peers that have the file
 	MainTracker    string
 	ListOfTrackers []string //list of all the trackers
 	ListOfHashes   [][]byte //hashes for each piece of the file
 	InfoHash       []byte
-	File           []byte //property to write the file when the pieces arrive
+	FileLength     int
+	File           [][]byte //property to write the file when the pieces arrive
 }
 
 // TODO: for now it loads the infohash forcefully, because this library is complete shit and cannot for the life of it calculate the infohash
@@ -29,7 +34,26 @@ func (this *TorrentFileToBuild) loadHashes(torrentInfo *TorrentFileInfo) {
 }
 func (this *TorrentFileToBuild) loadInfoHash(hash []byte) {
 	this.InfoHash = hash
+
 }
+func (this *TorrentFileToBuild) CalculateTotalPiecesAndBlockLength(info TorrentFileInfo) {
+	this.FileLength = info.Info.Length
+	this.PieceSize = info.Info.PieceLength
+	this.TotalPieces = this.FileLength / this.PieceSize
+	this.BlockLength = 16384
+	this.AmountOfBlocks = this.PieceSize / this.BlockLength //Calculate the amount of blocks per piece
+
+	printWithColor(Red, fmt.Sprint("FILE TOTAL SIZE: ", this.FileLength))
+	printWithColor(Red, fmt.Sprint("Pieces size: ", this.PieceSize))
+	printWithColor(Red, fmt.Sprint("Total pieces: ", this.TotalPieces))
+	printWithColor(Red, fmt.Sprint("Block size: ", this.BlockLength))
+	printWithColor(Red, fmt.Sprint("Amount of blocks: ", this.AmountOfBlocks))
+	if this.FileLength == 0 {
+		log.Panic("ERROR ON READING THE FILE LENGTH, FOR NOW THIS ONLY SUPPORTS SINGLE FILE DOWNLOADING")
+	}
+
+}
+
 func (this *TorrentFileToBuild) loadTrackers(torrentInfo *TorrentFileInfo) {
 	this.MainTracker = torrentInfo.Announce
 	for _, tracker := range torrentInfo.AnnounceList {
@@ -102,24 +126,38 @@ func (this *TorrentFileToBuild) getPeers() {
 }
 
 func (this *TorrentFileToBuild) downloadFile() {
-	for fileIndex, hash := range this.ListOfHashes {
-		this.askPeersForFile(fileIndex, hash)
+	//loop all the pieces
+	for fileIndex, _ := range this.ListOfHashes {
+		wholePiece := []byte{}
+
+		for i := 0; i < this.BlockLength; i++ {
+			blockOffset := i * this.BlockLength
+
+			data, err := this.askPeerForBlockOfFile(fileIndex, this.InfoHash, blockOffset) //HARD CODED
+			if err != nil {
+				printWithColor(Red, err.Error())
+			} else {
+				wholePiece = append(wholePiece, data...)
+			}
+		}
+		this.File[fileIndex] = wholePiece
 	}
 }
 
-func (this *TorrentFileToBuild) askPeersForFile(fileIndex int, hash []byte) ([]byte, error) {
-	//request the file to the peers
-	for _, ip := range this.ipsWithTheFile {
+func (this *TorrentFileToBuild) askPeerForBlockOfFile(fileIndex int, infoHash []byte, blockOffset int) ([]byte, error) {
 
+	for _, ip := range this.ipsWithTheFile {
 		peerID, err := generatePeerID()
 		if err != nil {
 			log.Print("Error generating peerID", err)
 		}
 
-		err = connectToPeerAndRequestFile(ip, fileIndex, hash, peerID)
+		file, err := connectToPeerAndRequestFile(ip, fileIndex, infoHash, peerID, blockOffset, this.BlockLength)
 		if err != nil {
 			log.Println(err)
+			continue
 		}
+		printWithColor(Yellow, fmt.Sprint("ME DIERON LA FILE:!!!    ", file))
 	}
 
 	return nil, nil

@@ -8,25 +8,29 @@ import (
 	"time"
 )
 
-func connectToPeerAndRequestFile(ip string, fileIndex int, fileHash []byte, peerID [20]byte) error {
+func connectToPeerAndRequestFile(ip string, fileIndex int, infoHash []byte, peerID [20]byte, blockOffset int, blockLength int) ([]byte, error) {
 	//create the tcp connection
 	conn, err := createTcpConnection(ip)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	//send the handshake
-	data, err := handleHandshake(fileHash, peerID, &conn)
+	data, err := handleHandshake(infoHash, peerID, &conn)
 	if err != nil {
-		return createError("connectToPeerAndRequestFile()", err.Error())
+		return nil, createError("connectToPeerAndRequestFile()", err.Error())
 	}
 	printWithColor(Red, fmt.Sprint("el handshake de vuelta: ", data))
 
 	//send the request for the data
-	err = sendPayload(&conn, fileIndex, 0)
+	data, err = sendPayload(&conn, fileIndex, blockOffset, blockLength)
+	if err != nil {
+		return nil, err
+	}
+
 	fmt.Print("data Sent")
 
-	return nil
+	return data, nil
 
 }
 
@@ -42,29 +46,29 @@ func createTcpConnection(ip string) (net.Conn, error) {
 	return conn, nil
 }
 
-func handleHandshake(fileHash []byte, peerID [20]byte, connPtr *net.Conn) ([]byte, error) {
+func handleHandshake(infoHash []byte, peerID [20]byte, connPtr *net.Conn) ([]byte, error) {
 	//deserialize the pointer
 	conn := *connPtr
 	//handle the handshake
 	var handshakeMessage bytes.Buffer
 
-	//Write the length
-	if err := binary.Write(&handshakeMessage, binary.BigEndian, byte(9)); err != nil {
+	//Write the length (pstrlen)
+	if err := binary.Write(&handshakeMessage, binary.BigEndian, byte(19)); err != nil {
 		return nil, createError("connectToPeerAndRequestFile()", err.Error())
 	}
-	//Write the protocol
-	if err := binary.Write(&handshakeMessage, binary.BigEndian, []byte("BitTorrent")); err != nil {
+	//Write the protocol (pstr)
+	if err := binary.Write(&handshakeMessage, binary.BigEndian, []byte("BitTorrent protocol")); err != nil {
 		return nil, createError("connectToPeerAndRequestFile()", err.Error())
 	}
-	//Write the reserved 8 bytes
+	//Write the reserved 8 bytes (reserved)
 	if err := binary.Write(&handshakeMessage, binary.BigEndian, make([]byte, 8)); err != nil {
 		return nil, createError("connectToPeerAndRequestFile()", err.Error())
 	}
-	//Write the hash
-	if err := binary.Write(&handshakeMessage, binary.BigEndian, fileHash); err != nil {
+	//Write the hash (info_hash)
+	if err := binary.Write(&handshakeMessage, binary.BigEndian, infoHash); err != nil {
 		return nil, createError("connectToPeerAndRequestFile()", err.Error())
 	}
-	//Write the peerID
+	//Write the peerID (peer_id)
 	if err := binary.Write(&handshakeMessage, binary.BigEndian, peerID); err != nil {
 		return nil, createError("connectToPeerAndRequestFile()", err.Error())
 	}
@@ -84,46 +88,50 @@ func handleHandshake(fileHash []byte, peerID [20]byte, connPtr *net.Conn) ([]byt
 	return data, nil
 }
 
-func sendPayload(connPtr *net.Conn, fileIndex int, beginIndex int) error {
+func sendPayload(connPtr *net.Conn, fileIndex int, blockOffset int, blockLength int) ([]byte, error) {
 	conn := *connPtr
 	//load the payload to send to the peer
 	var buff bytes.Buffer
-	//Size of the request
-	if err := binary.Write(&buff, binary.BigEndian, byte(9)); err != nil {
-		return createError("sendPayload()", err.Error())
 
+	//Size of the request (Message Length)
+	if err := binary.Write(&buff, binary.BigEndian, int32(13)); err != nil {
+		return nil, createError("sendPayload() Message Length ", err.Error())
 	}
-	//indicate that this is a request with the 6
+	//indicate that this is a request with the 6 (Message ID)
 	if err := binary.Write(&buff, binary.BigEndian, byte(6)); err != nil {
-		return createError("sendPayload()", err.Error())
+		return nil, createError("sendPayload() Message ID  ", err.Error())
 	}
-	//file index
+	//The index of the piece being requested. (Piece Index)
 	if err := binary.Write(&buff, binary.BigEndian, int32(fileIndex)); err != nil {
-		return createError("sendPayload()", err.Error())
+		return nil, createError("sendPayload() Piece Index", err.Error())
 	}
-	//begin index
-	if err := binary.Write(&buff, binary.BigEndian, int32(beginIndex)); err != nil {
-		return createError("sendPayload()", err.Error())
+	//Block Length
+	if err := binary.Write(&buff, binary.BigEndian, int32(blockOffset)); err != nil {
+		return nil, createError("sendPayload() Block Length", err.Error())
+	}
+	//Block length
+	if err := binary.Write(&buff, binary.BigEndian, int32(blockLength)); err != nil {
+		return nil, createError("sendPayload() ", err.Error())
 	}
 
 	//send the payload requesting the file
 	n, err := conn.Write(buff.Bytes())
 	if n == 0 || err != nil {
-		return createError("sendPayload() on conn.Write()", err.Error())
+		return nil, createError("sendPayload() on conn.Write()", err.Error())
 	}
 
 	var response = make([]byte, 10000)
 	n, err = conn.Read(response)
 	if n == 0 {
-		return createError("sendPayload() on conn.Write()", "Response is 0 bytes")
+		return nil, createError("sendPayload() on conn.Write()", "Response is 0 bytes")
 	}
 	if err != nil {
-		return createError("sendPayload() on conn.Write()", err.Error())
+		return nil, createError("sendPayload() on conn.Write()", err.Error())
 	}
 
 	conn.Close()
 
-	return nil
+	return response, nil
 }
 
 func listenConnections() ([]byte, error) {

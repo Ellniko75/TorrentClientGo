@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -27,6 +28,7 @@ type TorrentFileInfo struct {
 	Info     struct {
 		Pieces      string `bencode:"pieces"`
 		PieceLength int    `bencode:"piece length"`
+		Length      int    `bencode:"length"`
 	} `bencode:"info"`
 	AnnounceList [][]string `bencode:"announce-list"` // Optional multiple trackers
 }
@@ -48,11 +50,14 @@ func main() {
 		log.Println("Error on unmarshaling")
 	}
 
+	fmt.Println("total length ", torrentInfo.Info.PieceLength)
+
 	//torrent that will be constructed
+
 	TorrentFileToBuild := TorrentFileToBuild{}
 
 	//don't try to do all this on a single function, it destroys itself lmao
-	hexHash, err := getHexHash("dandadan2.torrent")
+	hexHash, err := getHexHash("xoka.torrent")
 	if err != nil {
 		log.Println(err)
 	}
@@ -61,6 +66,7 @@ func main() {
 		log.Println(err)
 	}
 
+	TorrentFileToBuild.CalculateTotalPiecesAndBlockLength(torrentInfo)
 	TorrentFileToBuild.loadInfoHash(hash)
 	TorrentFileToBuild.loadHashes(&torrentInfo)
 	TorrentFileToBuild.loadTrackers(&torrentInfo)

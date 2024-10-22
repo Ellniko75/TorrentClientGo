@@ -32,9 +32,8 @@ type TorrentFileInfo struct {
 }
 
 func main() {
-	//go listenConnections()
 
-	time.Sleep(2 * time.Second)
+	//time.Sleep(2 * time.Second)
 
 	file, err := os.Open("./torrents/xoka.torrent")
 	defer file.Close()
@@ -52,8 +51,8 @@ func main() {
 	//torrent that will be constructed
 	TorrentFileToBuild := TorrentFileToBuild{}
 
-	//don't try to do this on a function, it destroys itself lmao
-	hexHash, err := getHexHash("db.torrent")
+	//don't try to do all this on a single function, it destroys itself lmao
+	hexHash, err := getHexHash("dandadan2.torrent")
 	if err != nil {
 		log.Println(err)
 	}
@@ -66,7 +65,7 @@ func main() {
 	TorrentFileToBuild.loadHashes(&torrentInfo)
 	TorrentFileToBuild.loadTrackers(&torrentInfo)
 	TorrentFileToBuild.getPeers()
-	//TorrentFileToBuild.downloadFile()
+	TorrentFileToBuild.downloadFile()
 
 }
 func getHexHash(torrentName string) (string, error) {

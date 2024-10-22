@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"math/rand"
 	"strings"
@@ -38,8 +37,10 @@ func (this *TorrentFileToBuild) loadTrackers(torrentInfo *TorrentFileInfo) {
 		this.ListOfTrackers = append(this.ListOfTrackers, trackerToStr)
 	}
 }
+
+// Loop all the torrent trackers and get the peers that have the file
 func (this *TorrentFileToBuild) getPeers() {
-	//for {
+
 	for _, tracker := range this.ListOfTrackers {
 		if tracker[:3] == "udp" {
 			//Adjust the format of the UDP tracker URL
@@ -58,6 +59,7 @@ func (this *TorrentFileToBuild) getPeers() {
 
 			//Create random transaction ID
 			transactionID := int32(rand.Int31())
+
 			//Request to UDP TRACKER and read the response
 			transactionIDResponse, connectionIDResponse, err := initiateUdpConnection(conn, transactionID)
 			if err != nil {
@@ -71,9 +73,8 @@ func (this *TorrentFileToBuild) getPeers() {
 				printWithColor(Red, err.Error())
 				continue
 			}
-
-			//GET ALL THE PEERS THAT HAVE THE FILE
-			trackerAnnounceResponse, _, err := scrapeIpsFromTracker(
+			//GET ALL THE PEERS THAT HAVE THE FILE FROM THE TRACKERS
+			trackerAnnounceResponse, _, err := getPeers(
 				conn,
 				this.InfoHash,
 				connectionIDResponse,
@@ -90,18 +91,14 @@ func (this *TorrentFileToBuild) getPeers() {
 			TrackerResponseParsed.Print()
 			ipsAndPorts := TrackerResponseParsed.getIpAndPorts()
 
-			for _, v := range ipsAndPorts {
-				printWithColor(Red, v)
-				this.ipsWithTheFile = append(this.ipsWithTheFile, v)
-			}
-
+			//Add all the Ips and ports to the TorrentFileToBuild
+			this.AddIpsThatHaveTheFile(ipsAndPorts)
 			//CLOSE THE CONNECTION
 			conn.Close()
 		}
-
 	}
 	//time.Sleep(10 * time.Second)
-	//}
+
 }
 
 func (this *TorrentFileToBuild) downloadFile() {
@@ -109,14 +106,16 @@ func (this *TorrentFileToBuild) downloadFile() {
 		this.askPeersForFile(fileIndex, hash)
 	}
 }
+
 func (this *TorrentFileToBuild) askPeersForFile(fileIndex int, hash []byte) ([]byte, error) {
 	//request the file to the peers
 	for _, ip := range this.ipsWithTheFile {
-		fmt.Printf("DONT PAY ATTENTION TO THIS: %v\n", ip)
+
 		peerID, err := generatePeerID()
 		if err != nil {
 			log.Print("Error generating peerID", err)
 		}
+
 		err = connectToPeerAndRequestFile(ip, fileIndex, hash, peerID)
 		if err != nil {
 			log.Println(err)
@@ -124,4 +123,13 @@ func (this *TorrentFileToBuild) askPeersForFile(fileIndex int, hash []byte) ([]b
 	}
 
 	return nil, nil
+}
+
+// Receives the Ips Parsed as strings ("192.34.50.91:2092") and adds them to the TorrentFileToBuild.ipsWithTheFile Slice
+func (this *TorrentFileToBuild) AddIpsThatHaveTheFile(ipsParsed []string) {
+	for _, v := range ipsParsed {
+		printWithColor(Red, v)
+		this.ipsWithTheFile = append(this.ipsWithTheFile, v)
+	}
+
 }

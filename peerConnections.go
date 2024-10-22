@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"time"
 )
 
 func connectToPeerAndRequestFile(ip string, fileIndex int, fileHash []byte, peerID [20]byte) error {
@@ -32,12 +33,12 @@ func connectToPeerAndRequestFile(ip string, fileIndex int, fileHash []byte, peer
 // Creates the tcp connection and dials up with the url, for now it's hardcoded to request to the port I know its opened, since I cannot make the port be good
 func createTcpConnection(ip string) (net.Conn, error) {
 	// Connect to the server
-	printWithColor(Yellow, fmt.Sprint(" Connecting to: ", ip))
-	conn, err := net.Dial("tcp", ip)
+	printWithColor(Yellow, fmt.Sprint(" Attempting to Connect: ", ip))
+	conn, err := net.DialTimeout("tcp", ip, 2*time.Second)
 	if err != nil {
 		return nil, createError("createTcpConnection()", err.Error())
 	}
-
+	printWithColor(Yellow, fmt.Sprint(" Connected to: ", ip))
 	return conn, nil
 }
 
@@ -108,7 +109,16 @@ func sendPayload(connPtr *net.Conn, fileIndex int, beginIndex int) error {
 	//send the payload requesting the file
 	n, err := conn.Write(buff.Bytes())
 	if n == 0 || err != nil {
-		return createError("connectToPeerAndRequestFile() on conn.Write()", err.Error())
+		return createError("sendPayload() on conn.Write()", err.Error())
+	}
+
+	var response = make([]byte, 10000)
+	n, err = conn.Read(response)
+	if n == 0 {
+		return createError("sendPayload() on conn.Write()", "Response is 0 bytes")
+	}
+	if err != nil {
+		return createError("sendPayload() on conn.Write()", err.Error())
 	}
 
 	conn.Close()

@@ -67,8 +67,8 @@ func initiateUdpConnection(conn *net.UDPConn, transactionID int32) (uint32, uint
 	return transactionIDResponse, connectionIDResponse, nil
 }
 
-func scrapeIpsFromTracker(conn *net.UDPConn, hash []byte, connectionId uint64, transactionID uint32, peerID [20]byte) ([]byte, int, error) {
-	currentFunctionName := "scrapeIpsFromTracker()"
+func getPeers(conn *net.UDPConn, hash []byte, connectionId uint64, transactionID uint32, peerID [20]byte) ([]byte, int, error) {
+	currentFunctionName := "getPeers()"
 
 	if len(hash) != 20 {
 		log.Println("ERROR ON ", currentFunctionName, " THE HASH MUST BE OF 20 BYTES")

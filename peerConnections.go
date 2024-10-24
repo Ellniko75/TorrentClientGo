@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func connectToPeerAndRequestFile(ip string, fileIndex int, infoHash []byte, peerID [20]byte, blockOffset int, blockLength int) ([]byte, error) {
+func connectToPeerAndRequestBlockOfFile(ip string, fileIndex int, infoHash []byte, peerID [20]byte, blockOffset int, blockLength int) ([]byte, error) {
 	//create the tcp connection
 	conn, err := createTcpConnection(ip)
 	if err != nil {
@@ -18,9 +18,9 @@ func connectToPeerAndRequestFile(ip string, fileIndex int, infoHash []byte, peer
 	//send the handshake
 	data, err := handleHandshake(infoHash, peerID, &conn)
 	if err != nil {
-		return nil, createError("connectToPeerAndRequestFile()", err.Error())
+		return nil, createError("connectToPeerAndRequestBlockOfFile()", err.Error())
 	}
-	printWithColor(Red, fmt.Sprint("el handshake de vuelta: ", data))
+	printWithColor(Red, fmt.Sprint("el handshake de vuelta respondio"))
 
 	//send the request for the data
 	data, err = sendPayload(&conn, fileIndex, blockOffset, blockLength)
@@ -54,28 +54,28 @@ func handleHandshake(infoHash []byte, peerID [20]byte, connPtr *net.Conn) ([]byt
 
 	//Write the length (pstrlen)
 	if err := binary.Write(&handshakeMessage, binary.BigEndian, byte(19)); err != nil {
-		return nil, createError("connectToPeerAndRequestFile()", err.Error())
+		return nil, createError("connectToPeerAndRequestBlockOfFile()", err.Error())
 	}
 	//Write the protocol (pstr)
 	if err := binary.Write(&handshakeMessage, binary.BigEndian, []byte("BitTorrent protocol")); err != nil {
-		return nil, createError("connectToPeerAndRequestFile()", err.Error())
+		return nil, createError("connectToPeerAndRequestBlockOfFile()", err.Error())
 	}
 	//Write the reserved 8 bytes (reserved)
 	if err := binary.Write(&handshakeMessage, binary.BigEndian, make([]byte, 8)); err != nil {
-		return nil, createError("connectToPeerAndRequestFile()", err.Error())
+		return nil, createError("connectToPeerAndRequestBlockOfFile()", err.Error())
 	}
 	//Write the hash (info_hash)
 	if err := binary.Write(&handshakeMessage, binary.BigEndian, infoHash); err != nil {
-		return nil, createError("connectToPeerAndRequestFile()", err.Error())
+		return nil, createError("connectToPeerAndRequestBlockOfFile()", err.Error())
 	}
 	//Write the peerID (peer_id)
 	if err := binary.Write(&handshakeMessage, binary.BigEndian, peerID); err != nil {
-		return nil, createError("connectToPeerAndRequestFile()", err.Error())
+		return nil, createError("connectToPeerAndRequestBlockOfFile()", err.Error())
 	}
 
 	n, err := conn.Write(handshakeMessage.Bytes())
 	if err != nil {
-		return nil, createError("connectToPeerAndRequestFile()", err.Error())
+		return nil, createError("connectToPeerAndRequestBlockOfFile()", err.Error())
 	} else {
 		printWithColor(Yellow, fmt.Sprint(" Hanshake Bytes sent:", n))
 	}
@@ -119,55 +119,15 @@ func sendPayload(connPtr *net.Conn, fileIndex int, blockOffset int, blockLength 
 	if n == 0 || err != nil {
 		return nil, createError("sendPayload() on conn.Write()", err.Error())
 	}
-
-	var response = make([]byte, 10000)
+	//create the response slice, expecting it to be of length "blockLength" but + 18 because that's the amount of bytes the protocol adds on top
+	//of the file
+	var response = make([]byte, blockLength+18)
 	n, err = conn.Read(response)
-	if n == 0 {
-		return nil, createError("sendPayload() on conn.Write()", "Response is 0 bytes")
-	}
 	if err != nil {
 		return nil, createError("sendPayload() on conn.Write()", err.Error())
 	}
 
 	conn.Close()
-
-	return response, nil
-}
-
-func listenConnections() ([]byte, error) {
-	listener, err := net.Listen("tcp", ":6881")
-	if err != nil {
-		return nil, createError("connectToPeerAndRequestFile()", err.Error())
-	}
-	fmt.Println("listening...")
-	for {
-		conn, err := listener.Accept()
-		printWithColor(Red, "CONNECTIONS ARRIVED LMAOOOOOOOOOOO")
-		if err != nil {
-			return nil, createError("listener.Accept() on listenConnections()", err.Error())
-		}
-		response, err := readIncomingMessages(conn)
-		if err != nil {
-			printWithColor(Red, fmt.Sprint("la cagamo", err.Error()))
-			return nil, err
-		} else {
-			printWithColor(Yellow, fmt.Sprint("WE DID IT, THE MESSAGE IS HERE: ", response))
-			return response, nil
-		}
-	}
-}
-
-func readIncomingMessages(conn net.Conn) ([]byte, error) {
-	buffer := make([]byte, 500000)
-	for {
-		n, err := conn.Read(buffer)
-		if err != nil {
-			fmt.Println("Error reading from connection:", err)
-			return nil, createError("handleConnections()", err.Error())
-		}
-		if n == 0 {
-			return buffer, nil
-		}
-		fmt.Println("Received:", string(buffer[:n]))
-	}
+	//return only the data part of the response
+	return response[18:], nil
 }

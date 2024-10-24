@@ -66,10 +66,10 @@ func main() {
 		log.Println(err)
 	}
 
-	TorrentFileToBuild.CalculateTotalPiecesAndBlockLength(torrentInfo)
 	TorrentFileToBuild.loadInfoHash(hash)
 	TorrentFileToBuild.loadHashes(&torrentInfo)
 	TorrentFileToBuild.loadTrackers(&torrentInfo)
+	TorrentFileToBuild.CalculateTotalPiecesAndBlockLength(torrentInfo)
 	TorrentFileToBuild.getPeers()
 	TorrentFileToBuild.downloadFile()
 

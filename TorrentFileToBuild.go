@@ -20,7 +20,7 @@ type TorrentFileToBuild struct {
 	ListOfHashes   [][]byte //hashes for each piece of the file
 	InfoHash       []byte
 	FileLength     int
-	File           [][]byte //property to write the file when the pieces arrive
+	File           [100000][]byte //property to write the file when the pieces arrive
 }
 
 // TODO: for now it loads the infohash forcefully, because this library is complete shit and cannot for the life of it calculate the infohash
@@ -51,7 +51,6 @@ func (this *TorrentFileToBuild) CalculateTotalPiecesAndBlockLength(info TorrentF
 	if this.FileLength == 0 {
 		log.Panic("ERROR ON READING THE FILE LENGTH, FOR NOW THIS ONLY SUPPORTS SINGLE FILE DOWNLOADING")
 	}
-
 }
 
 func (this *TorrentFileToBuild) loadTrackers(torrentInfo *TorrentFileInfo) {
@@ -125,42 +124,61 @@ func (this *TorrentFileToBuild) getPeers() {
 
 }
 
+// Blocks form a Piece, and Pieces form the file
 func (this *TorrentFileToBuild) downloadFile() {
 	//loop all the pieces
-	for fileIndex, _ := range this.ListOfHashes {
+	for fileIndex, fileHash := range this.ListOfHashes {
 		wholePiece := []byte{}
-
-		for i := 0; i < this.BlockLength; i++ {
+		//loop all the blocks of the piece
+		for i := 0; i < this.AmountOfBlocks; i++ {
 			blockOffset := i * this.BlockLength
-
-			data, err := this.askPeerForBlockOfFile(fileIndex, this.InfoHash, blockOffset) //HARD CODED
+			data, err := this.askPeersForBlockOfFile(fileIndex, this.InfoHash, blockOffset)
 			if err != nil {
 				printWithColor(Red, err.Error())
 			} else {
+
+				/*
+					dataExpected, err := GetExpectedBytes(blockOffset, blockOffset+this.BlockLength)
+					if err != nil {
+						log.Println(err)
+					}
+					printWithColor(Green, fmt.Sprint("Data gotten: ", data[len(dataExpected)-20:]))
+					fmt.Println("")
+					fmt.Println("")
+					fmt.Println("")
+					printWithColor(Green, fmt.Sprint("Data expected: ", dataExpected[len(dataExpected)-20:]))
+				*/
+				//append all the blocks to the piece
 				wholePiece = append(wholePiece, data...)
 			}
 		}
+		wholePieceSha1Hash := GetSha1Hash(wholePiece)
+		printWithColor(Green, fmt.Sprint("Original hash file:", fileHash))
+		printWithColor(Green, fmt.Sprint("Gotten file hash:", wholePieceSha1Hash))
+
+		//Append the piece to the actual file
 		this.File[fileIndex] = wholePiece
 	}
 }
 
-func (this *TorrentFileToBuild) askPeerForBlockOfFile(fileIndex int, infoHash []byte, blockOffset int) ([]byte, error) {
-
+func (this *TorrentFileToBuild) askPeersForBlockOfFile(fileIndex int, infoHash []byte, blockOffset int) ([]byte, error) {
 	for _, ip := range this.ipsWithTheFile {
 		peerID, err := generatePeerID()
 		if err != nil {
 			log.Print("Error generating peerID", err)
 		}
 
-		file, err := connectToPeerAndRequestFile(ip, fileIndex, infoHash, peerID, blockOffset, this.BlockLength)
+		blockOfFile, err := connectToPeerAndRequestBlockOfFile(ip, fileIndex, infoHash, peerID, blockOffset, this.BlockLength)
 		if err != nil {
-			log.Println(err)
-			continue
+			log.Println("Error on askPeersForBlockOfFile", err)
+		} else {
+			time.Sleep(1 * time.Second) //time to see the console
+			return blockOfFile, nil
 		}
-		printWithColor(Yellow, fmt.Sprint("ME DIERON LA FILE:!!!    ", file))
+
 	}
 
-	return nil, nil
+	return nil, createError("askPeersForBlockOfFile()", " Failed to get the block of the file")
 }
 
 // Receives the Ips Parsed as strings ("192.34.50.91:2092") and adds them to the TorrentFileToBuild.ipsWithTheFile Slice

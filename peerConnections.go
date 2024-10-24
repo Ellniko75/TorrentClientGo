@@ -8,30 +8,38 @@ import (
 	"time"
 )
 
-func connectToPeerAndRequestBlockOfFile(ip string, fileIndex int, infoHash []byte, peerID [20]byte, blockOffset int, blockLength int) ([]byte, error) {
+func connectToPeerAndRequestWholePiece(ip string, fileIndex int, infoHash []byte, peerID [20]byte, blockLength int, amountOfBlocks int) ([]byte, error) {
 	//create the tcp connection
 	conn, err := createTcpConnection(ip)
 	if err != nil {
 		return nil, err
 	}
+	defer conn.Close()
 
 	//send the handshake
 	data, err := handleHandshake(infoHash, peerID, &conn)
 	if err != nil {
 		return nil, createError("connectToPeerAndRequestBlockOfFile()", err.Error())
 	}
-	printWithColor(Red, fmt.Sprint("el handshake de vuelta respondio"))
+	//printWithColor(Red, fmt.Sprint("el handshake de vuelta respondio"))
 
-	//send the request for the data
-	data, err = sendPayload(&conn, fileIndex, blockOffset, blockLength)
-	if err != nil {
-		return nil, err
+	wholePiece := []byte{}
+	for i := 0; i < amountOfBlocks; i++ {
+		blockOffset := blockLength * i
+
+		//send the request for the data
+		data, err = requestBlock(&conn, fileIndex, blockOffset, blockLength)
+		if err != nil {
+			return nil, err
+		} else {
+			time.Sleep(1 * time.Second)
+			wholePiece = append(wholePiece, data...)
+		}
 	}
-
-	fmt.Print("data Sent")
-
-	return data, nil
-
+	printWithColor(Yellow, fmt.Sprint("Downloaded piece: ", fileIndex))
+	//hard to explain, but basically the first requestBlock() petition has a padding of 5 extra bytes that the other consecuently don't have,
+	//therefore we just don't send those first 5 bytes as the final complete piece
+	return wholePiece[5:], nil
 }
 
 // Creates the tcp connection and dials up with the url, for now it's hardcoded to request to the port I know its opened, since I cannot make the port be good
@@ -88,46 +96,50 @@ func handleHandshake(infoHash []byte, peerID [20]byte, connPtr *net.Conn) ([]byt
 	return data, nil
 }
 
-func sendPayload(connPtr *net.Conn, fileIndex int, blockOffset int, blockLength int) ([]byte, error) {
+func requestBlock(connPtr *net.Conn, fileIndex int, blockOffset int, blockLength int) ([]byte, error) {
+	printWithColor(Red, fmt.Sprint("requesting index: ", fileIndex, " block offset: ", blockOffset))
 	conn := *connPtr
 	//load the payload to send to the peer
 	var buff bytes.Buffer
 
 	//Size of the request (Message Length)
 	if err := binary.Write(&buff, binary.BigEndian, int32(13)); err != nil {
-		return nil, createError("sendPayload() Message Length ", err.Error())
+		return nil, createError("requestBlock() Message Length ", err.Error())
 	}
 	//indicate that this is a request with the 6 (Message ID)
 	if err := binary.Write(&buff, binary.BigEndian, byte(6)); err != nil {
-		return nil, createError("sendPayload() Message ID  ", err.Error())
+		return nil, createError("requestBlock() Message ID  ", err.Error())
 	}
 	//The index of the piece being requested. (Piece Index)
 	if err := binary.Write(&buff, binary.BigEndian, int32(fileIndex)); err != nil {
-		return nil, createError("sendPayload() Piece Index", err.Error())
+		return nil, createError("requestBlock() Piece Index", err.Error())
 	}
-	//Block Length
+	//Block Offset
 	if err := binary.Write(&buff, binary.BigEndian, int32(blockOffset)); err != nil {
-		return nil, createError("sendPayload() Block Length", err.Error())
+		return nil, createError("requestBlock() Block Length", err.Error())
 	}
 	//Block length
 	if err := binary.Write(&buff, binary.BigEndian, int32(blockLength)); err != nil {
-		return nil, createError("sendPayload() ", err.Error())
+		return nil, createError("requestBlock() ", err.Error())
 	}
 
 	//send the payload requesting the file
 	n, err := conn.Write(buff.Bytes())
 	if n == 0 || err != nil {
-		return nil, createError("sendPayload() on conn.Write()", err.Error())
+		return nil, createError("requestBlock() on conn.Write()", err.Error())
 	}
-	//create the response slice, expecting it to be of length "blockLength" but + 18 because that's the amount of bytes the protocol adds on top
-	//of the file
-	var response = make([]byte, blockLength+18)
+	//response has to be around 20.000 bytes since each block of response is 16kb (16.000 bytes)
+	var response = make([]byte, 20000)
 	n, err = conn.Read(response)
 	if err != nil {
-		return nil, createError("sendPayload() on conn.Write()", err.Error())
+		return nil, createError("requestBlock() on conn.Write()", err.Error())
 	}
 
-	conn.Close()
-	//return only the data part of the response
-	return response[18:], nil
+	fmt.Println("")
+	fmt.Println("")
+	fmt.Println("")
+	fmt.Println("")
+	fmt.Println("")
+	//return only the data, not the metadata
+	return response[13:n], nil
 }

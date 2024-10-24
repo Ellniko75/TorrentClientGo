@@ -13,7 +13,7 @@ func GetSha1Hash(toHash []byte) []byte {
 	return hashBytes
 }
 
-func GetExpectedBytes(indexStart int, indexFinish int) ([]byte, error) {
+func GetExpectedFile() ([]byte, error) {
 	file, err := os.Open("./xokas.mp4")
 	defer file.Close()
 
@@ -28,6 +28,6 @@ func GetExpectedBytes(indexStart int, indexFinish int) ([]byte, error) {
 		return nil, err
 	}
 
-	return fileRead[indexStart:indexFinish], nil
+	return fileRead, nil
 
 }

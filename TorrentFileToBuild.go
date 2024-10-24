@@ -128,52 +128,36 @@ func (this *TorrentFileToBuild) getPeers() {
 func (this *TorrentFileToBuild) downloadFile() {
 	//loop all the pieces
 	for fileIndex, fileHash := range this.ListOfHashes {
-		wholePiece := []byte{}
-		//loop all the blocks of the piece
-		for i := 0; i < this.AmountOfBlocks; i++ {
-			blockOffset := i * this.BlockLength
-			data, err := this.askPeersForBlockOfFile(fileIndex, this.InfoHash, blockOffset)
-			if err != nil {
-				printWithColor(Red, err.Error())
-			} else {
+		//get the file piece, the one thats composed by all the blocks and check if the hash is correct
+		data, err := this.askForFilePiece(fileIndex, this.InfoHash, this.AmountOfBlocks)
+		if err != nil {
+			printWithColor(Red, err.Error())
+		} else {
+			wholePieceSha1Hash := GetSha1Hash(data)
+			printWithColor(Green, fmt.Sprint("Original hash file:", fileHash))
+			printWithColor(Green, fmt.Sprint("Gotten file hash:", wholePieceSha1Hash))
 
-				/*
-					dataExpected, err := GetExpectedBytes(blockOffset, blockOffset+this.BlockLength)
-					if err != nil {
-						log.Println(err)
-					}
-					printWithColor(Green, fmt.Sprint("Data gotten: ", data[len(dataExpected)-20:]))
-					fmt.Println("")
-					fmt.Println("")
-					fmt.Println("")
-					printWithColor(Green, fmt.Sprint("Data expected: ", dataExpected[len(dataExpected)-20:]))
-				*/
-				//append all the blocks to the piece
-				wholePiece = append(wholePiece, data...)
-			}
+			//Append the piece to the actual file
+			this.File[fileIndex] = data
+
 		}
-		wholePieceSha1Hash := GetSha1Hash(wholePiece)
-		printWithColor(Green, fmt.Sprint("Original hash file:", fileHash))
-		printWithColor(Green, fmt.Sprint("Gotten file hash:", wholePieceSha1Hash))
-
-		//Append the piece to the actual file
-		this.File[fileIndex] = wholePiece
 	}
+
 }
 
-func (this *TorrentFileToBuild) askPeersForBlockOfFile(fileIndex int, infoHash []byte, blockOffset int) ([]byte, error) {
+func (this *TorrentFileToBuild) askForFilePiece(fileIndex int, infoHash []byte, amountOfBlocks int) ([]byte, error) {
 	for _, ip := range this.ipsWithTheFile {
 		peerID, err := generatePeerID()
 		if err != nil {
 			log.Print("Error generating peerID", err)
 		}
 
-		blockOfFile, err := connectToPeerAndRequestBlockOfFile(ip, fileIndex, infoHash, peerID, blockOffset, this.BlockLength)
+		data, err := connectToPeerAndRequestWholePiece(ip, fileIndex, infoHash, peerID, this.BlockLength, amountOfBlocks)
 		if err != nil {
-			log.Println("Error on askPeersForBlockOfFile", err)
+			log.Println("Error on askForFilePiece()", err)
+			continue
 		} else {
-			time.Sleep(1 * time.Second) //time to see the console
-			return blockOfFile, nil
+			return data, nil
 		}
 
 	}

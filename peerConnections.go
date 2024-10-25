@@ -8,27 +8,14 @@ import (
 	"time"
 )
 
-func connectToPeerAndRequestWholePiece(ip string, fileIndex int, infoHash []byte, peerID [20]byte, blockLength int, amountOfBlocks int) ([]byte, error) {
-	//create the tcp connection
-	conn, err := createTcpConnection(ip)
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close()
-
-	//send the handshake
-	data, err := handleHandshake(infoHash, peerID, &conn)
-	if err != nil {
-		return nil, createError("connectToPeerAndRequestBlockOfFile()", err.Error())
-	}
-	//printWithColor(Red, fmt.Sprint("el handshake de vuelta respondio"))
+func connectToPeerAndRequestWholePiece(conn net.Conn, fileIndex int, blockLength int, amountOfBlocks int) ([]byte, error) {
 
 	wholePiece := []byte{}
 	for i := 0; i < amountOfBlocks; i++ {
 		blockOffset := blockLength * i
 
 		//send the request for the data
-		data, err = requestBlock(&conn, fileIndex, blockOffset, blockLength)
+		data, err := requestBlock(conn, fileIndex, blockOffset, blockLength)
 		if err != nil {
 			return nil, err
 		} else {
@@ -37,8 +24,8 @@ func connectToPeerAndRequestWholePiece(ip string, fileIndex int, infoHash []byte
 		}
 	}
 	printWithColor(Yellow, fmt.Sprint("Downloaded piece: ", fileIndex))
-	//hard to explain, but basically the first requestBlock() petition has a padding of 5 extra bytes that the other consecuently don't have,
-	//therefore we just don't send those first 5 bytes as the final complete piece
+
+	//for all the other pieces the peers do not send that 5 bytes, so que return the whole piece
 	return wholePiece[5:], nil
 }
 
@@ -54,51 +41,52 @@ func createTcpConnection(ip string) (net.Conn, error) {
 	return conn, nil
 }
 
-func handleHandshake(infoHash []byte, peerID [20]byte, connPtr *net.Conn) ([]byte, error) {
+func handleHandshake(infoHash []byte, peerID [20]byte, conn net.Conn) ([]byte, error) {
 	//deserialize the pointer
-	conn := *connPtr
+
 	//handle the handshake
 	var handshakeMessage bytes.Buffer
 
 	//Write the length (pstrlen)
 	if err := binary.Write(&handshakeMessage, binary.BigEndian, byte(19)); err != nil {
-		return nil, createError("connectToPeerAndRequestBlockOfFile()", err.Error())
+		return nil, createError("handleHandshake()", err.Error())
 	}
 	//Write the protocol (pstr)
 	if err := binary.Write(&handshakeMessage, binary.BigEndian, []byte("BitTorrent protocol")); err != nil {
-		return nil, createError("connectToPeerAndRequestBlockOfFile()", err.Error())
+		return nil, createError("handleHandshake()", err.Error())
 	}
 	//Write the reserved 8 bytes (reserved)
 	if err := binary.Write(&handshakeMessage, binary.BigEndian, make([]byte, 8)); err != nil {
-		return nil, createError("connectToPeerAndRequestBlockOfFile()", err.Error())
+		return nil, createError("handleHandshake()", err.Error())
 	}
 	//Write the hash (info_hash)
 	if err := binary.Write(&handshakeMessage, binary.BigEndian, infoHash); err != nil {
-		return nil, createError("connectToPeerAndRequestBlockOfFile()", err.Error())
+		return nil, createError("handleHandshake()", err.Error())
 	}
 	//Write the peerID (peer_id)
 	if err := binary.Write(&handshakeMessage, binary.BigEndian, peerID); err != nil {
-		return nil, createError("connectToPeerAndRequestBlockOfFile()", err.Error())
+		return nil, createError("handleHandshake()", err.Error())
 	}
 
 	n, err := conn.Write(handshakeMessage.Bytes())
 	if err != nil {
-		return nil, createError("connectToPeerAndRequestBlockOfFile()", err.Error())
+		return nil, createError("handleHandshake()", err.Error())
 	} else {
 		printWithColor(Yellow, fmt.Sprint(" Hanshake Bytes sent:", n))
 	}
 
-	data := make([]byte, 2048) // Adjust the size as needed
-	_, err = conn.Read(data)
+	data := make([]byte, 2048)
+	n, err = conn.Read(data)
 	if err != nil {
 		return nil, createError("handleHandshake()", err.Error())
 	}
+	printWithColor(Green, "Hanshake succesfull")
 	return data, nil
 }
 
-func requestBlock(connPtr *net.Conn, fileIndex int, blockOffset int, blockLength int) ([]byte, error) {
+func requestBlock(conn net.Conn, fileIndex int, blockOffset int, blockLength int) ([]byte, error) {
 	printWithColor(Red, fmt.Sprint("requesting index: ", fileIndex, " block offset: ", blockOffset))
-	conn := *connPtr
+
 	//load the payload to send to the peer
 	var buff bytes.Buffer
 
@@ -133,6 +121,13 @@ func requestBlock(connPtr *net.Conn, fileIndex int, blockOffset int, blockLength
 	n, err = conn.Read(response)
 	if err != nil {
 		return nil, createError("requestBlock() on conn.Write()", err.Error())
+	}
+	if n == 5 {
+		data, err := requestBlock(conn, fileIndex, blockOffset, blockLength)
+		if err != nil {
+			return nil, err
+		}
+		return data, nil
 	}
 
 	fmt.Println("")

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net"
 	"strings"
 	"time"
 )
@@ -21,6 +22,7 @@ type TorrentFileToBuild struct {
 	InfoHash       []byte
 	FileLength     int
 	File           [100000][]byte //property to write the file when the pieces arrive
+	Connections    []net.Conn     //this connections are initialized by the CreateConnections() function, the peers all store the infohash, so once you send it on the handhsake its not necessary to do so again
 }
 
 // TODO: for now it loads the infohash forcefully, because this library is complete shit and cannot for the life of it calculate the infohash
@@ -31,6 +33,29 @@ func (this *TorrentFileToBuild) loadHashes(torrentInfo *TorrentFileInfo) {
 		currentHash := torrentInfo.Info.Pieces[i : i+hashLen]
 		this.ListOfHashes = append(this.ListOfHashes, []byte(currentHash))
 	}
+}
+func (this *TorrentFileToBuild) CreateConnections() {
+	for _, v := range this.ipsWithTheFile {
+		conn, err := createTcpConnection(v)
+		if err != nil {
+			printWithColor(Red, fmt.Sprint("Error on CreateConnections ", err.Error()))
+			continue
+		}
+		PeerId, err := generatePeerID()
+		if err != nil {
+			printWithColor(Red, "Error generating peer id")
+			continue
+		}
+		//send the handshake
+		_, err = handleHandshake(this.InfoHash, PeerId, conn)
+		if err != nil {
+			printWithColor(Red, "Error on handshake")
+			continue
+		}
+		fmt.Println("Connection established")
+		this.Connections = append(this.Connections, conn)
+	}
+
 }
 func (this *TorrentFileToBuild) loadInfoHash(hash []byte) {
 	this.InfoHash = hash
@@ -129,7 +154,7 @@ func (this *TorrentFileToBuild) downloadFile() {
 	//loop all the pieces
 	for fileIndex, fileHash := range this.ListOfHashes {
 		//get the file piece, the one thats composed by all the blocks and check if the hash is correct
-		data, err := this.askForFilePiece(fileIndex, this.InfoHash, this.AmountOfBlocks)
+		data, err := this.askForFilePiece(fileIndex, this.AmountOfBlocks)
 		if err != nil {
 			printWithColor(Red, err.Error())
 		} else {
@@ -145,18 +170,21 @@ func (this *TorrentFileToBuild) downloadFile() {
 
 }
 
-func (this *TorrentFileToBuild) askForFilePiece(fileIndex int, infoHash []byte, amountOfBlocks int) ([]byte, error) {
-	for _, ip := range this.ipsWithTheFile {
-		peerID, err := generatePeerID()
-		if err != nil {
-			log.Print("Error generating peerID", err)
-		}
-
-		data, err := connectToPeerAndRequestWholePiece(ip, fileIndex, infoHash, peerID, this.BlockLength, amountOfBlocks)
+// loops all the connections and request the piece
+func (this *TorrentFileToBuild) askForFilePiece(fileIndex int, amountOfBlocks int) ([]byte, error) {
+	for _, conn := range this.Connections {
+		data, err := connectToPeerAndRequestWholePiece(conn, fileIndex, this.BlockLength, amountOfBlocks)
 		if err != nil {
 			log.Println("Error on askForFilePiece()", err)
 			continue
 		} else {
+			//fmt.Println("DATA GOTTEN: ", data)
+			fmt.Println()
+			fmt.Println()
+			fmt.Println()
+			fmt.Println()
+			fmt.Println()
+
 			return data, nil
 		}
 

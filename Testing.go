@@ -13,21 +13,20 @@ func GetSha1Hash(toHash []byte) []byte {
 	return hashBytes
 }
 
-func GetExpectedFile() ([]byte, error) {
+func GetExpectedFile() []byte {
 	file, err := os.Open("./xokas.mp4")
 	defer file.Close()
 
 	fileInfo, err := file.Stat()
 	if err != nil {
-		return nil, err
+		return nil
 	}
 
 	fileRead := make([]byte, fileInfo.Size())
 	_, err = file.Read(fileRead)
 	if err != nil {
-		return nil, err
+		return nil
 	}
 
-	return fileRead, nil
-
+	return fileRead
 }

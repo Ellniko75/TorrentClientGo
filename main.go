@@ -71,6 +71,7 @@ func main() {
 	TorrentFileToBuild.loadTrackers(&torrentInfo)
 	TorrentFileToBuild.CalculateTotalPiecesAndBlockLength(torrentInfo)
 	TorrentFileToBuild.getPeers()
+	TorrentFileToBuild.CreateConnections()
 	TorrentFileToBuild.downloadFile()
 
 }

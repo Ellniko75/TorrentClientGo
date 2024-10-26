@@ -5,6 +5,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"reflect"
 	"strings"
 	"time"
 )
@@ -157,15 +158,28 @@ func (this *TorrentFileToBuild) downloadFile() {
 		data, err := this.askForFilePiece(fileIndex, this.AmountOfBlocks)
 		if err != nil {
 			printWithColor(Red, err.Error())
-		} else {
-			wholePieceSha1Hash := GetSha1Hash(data)
-			printWithColor(Green, fmt.Sprint("Original hash file:", fileHash))
-			printWithColor(Green, fmt.Sprint("Gotten file hash:", wholePieceSha1Hash))
-
-			//Append the piece to the actual file
-			this.File[fileIndex] = data
-
+			continue
 		}
+
+		//hash of the whole piece
+		wholePieceSha1Hash := GetSha1Hash(data)
+		//hash of the whole piece except the first 5 bytes
+		alternativeHash := GetSha1Hash(data[5:])
+
+		if reflect.DeepEqual(wholePieceSha1Hash, fileHash) {
+			this.File[fileIndex] = data
+			printWithColor(Green, " The whole piece hash and the OG hash match")
+			WriteToOkstxt()
+
+		} else if reflect.DeepEqual(alternativeHash, fileHash) {
+			this.File[fileIndex] = data[5:]
+			printWithColor(Green, " The ALTERNATIVE piece hash and the OG hash match")
+			WriteToOkstxt()
+		} else {
+			printWithColor(Red, " the hashes don't match ")
+			WriteToErrorstxt()
+		}
+
 	}
 
 }
@@ -178,19 +192,12 @@ func (this *TorrentFileToBuild) askForFilePiece(fileIndex int, amountOfBlocks in
 			log.Println("Error on askForFilePiece()", err)
 			continue
 		} else {
-			//fmt.Println("DATA GOTTEN: ", data)
-			fmt.Println()
-			fmt.Println()
-			fmt.Println()
-			fmt.Println()
-			fmt.Println()
-
 			return data, nil
 		}
 
 	}
 
-	return nil, createError("askPeersForBlockOfFile()", " Failed to get the block of the file")
+	return nil, createError("askForFilePiece()", " Unable to establish any connections")
 }
 
 // Receives the Ips Parsed as strings ("192.34.50.91:2092") and adds them to the TorrentFileToBuild.ipsWithTheFile Slice

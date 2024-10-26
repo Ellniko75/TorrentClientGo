@@ -19,14 +19,13 @@ func connectToPeerAndRequestWholePiece(conn net.Conn, fileIndex int, blockLength
 		if err != nil {
 			return nil, err
 		} else {
-			time.Sleep(1 * time.Second)
+			//time.Sleep(1 * time.Second)
 			wholePiece = append(wholePiece, data...)
 		}
 	}
 	printWithColor(Yellow, fmt.Sprint("Downloaded piece: ", fileIndex))
-
 	//for all the other pieces the peers do not send that 5 bytes, so que return the whole piece
-	return wholePiece[5:], nil
+	return wholePiece, nil
 }
 
 // Creates the tcp connection and dials up with the url, for now it's hardcoded to request to the port I know its opened, since I cannot make the port be good
@@ -116,20 +115,25 @@ func requestBlock(conn net.Conn, fileIndex int, blockOffset int, blockLength int
 	if n == 0 || err != nil {
 		return nil, createError("requestBlock() on conn.Write()", err.Error())
 	}
-	//response has to be around 20.000 bytes since each block of response is 16kb (16.000 bytes)
-	var response = make([]byte, 20000)
-	n, err = conn.Read(response)
-	if err != nil {
-		return nil, createError("requestBlock() on conn.Write()", err.Error())
-	}
-	if n == 5 {
-		data, err := requestBlock(conn, fileIndex, blockOffset, blockLength)
+
+	totalRead := 0
+	//response has to be around 40.000 bytes since each block of response is 16kb (16.000 bytes)
+	var response = make([]byte, 40000)
+
+	for totalRead < 16384 {
+
+		n, err = conn.Read(response)
 		if err != nil {
-			return nil, err
+			return nil, createError("requestBlock() on conn.Write()", err.Error())
 		}
-		return data, nil
+		totalRead += n
 	}
 
+	//gottenFile := response[13:n]
+	//start := fileIndex * 131072
+	//expectedFile := GetExpectedFile()[start+blockOffset : start+blockOffset+blockLength]
+	//filesDoMatch := reflect.DeepEqual(gottenFile, expectedFile)
+	//printWithColor(Yellow, fmt.Sprint("Match? ", filesDoMatch))
 	fmt.Println("")
 	fmt.Println("")
 	fmt.Println("")

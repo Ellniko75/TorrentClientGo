@@ -24,7 +24,6 @@ func connectToPeerAndRequestWholePiece(conn net.Conn, fileIndex int, blockLength
 			wholePiece = append(wholePiece, data...)
 		}
 	}
-	printWithColor(Yellow, fmt.Sprint("Downloaded piece: ", fileIndex))
 	//for all the other pieces the peers do not send that 5 bytes, so que return the whole piece
 	return wholePiece, nil
 }

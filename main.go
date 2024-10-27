@@ -32,8 +32,9 @@ type TorrentFileInfo struct {
 
 func main() {
 	ResetOksAndErrors()
+	torrentUrl := "./torrents/xoka.torrent"
 
-	file, err := os.Open("./torrents/xoka.torrent")
+	file, err := os.Open(torrentUrl)
 	defer file.Close()
 	if err != nil {
 		log.Println("error on reading file")
@@ -53,7 +54,7 @@ func main() {
 	TorrentFileToBuild := TorrentFileToBuild{}
 
 	//don't try to do all this on a single function, it destroys itself lmao
-	hexHash, err := getHexHash("xoka.torrent")
+	hexHash, err := getHexHash(torrentUrl)
 	if err != nil {
 		log.Println(err)
 	}
@@ -66,14 +67,14 @@ func main() {
 	TorrentFileToBuild.loadHashes(&torrentInfo)
 	TorrentFileToBuild.loadTrackers(&torrentInfo)
 	TorrentFileToBuild.CalculateTotalPiecesAndBlockLength(torrentInfo)
-	TorrentFileToBuild.getPeers()
-	printWithColor(Blue, " Creating Connections With Peers...")
+	TorrentFileToBuild.GetPeers()
 	TorrentFileToBuild.CreateConnections()
+	fmt.Println("LENGTH OF THE CONNECTIONS ACCEPTED: ", len(TorrentFileToBuild.Connections))
 	TorrentFileToBuild.downloadFile()
 
 }
-func getHexHash(torrentName string) (string, error) {
-	cmd := exec.Command("python", "PythonScripts/CalculateHash.py", torrentName)
+func getHexHash(torrentPath string) (string, error) {
+	cmd := exec.Command("python", "PythonScripts/CalculateHash.py", torrentPath)
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err

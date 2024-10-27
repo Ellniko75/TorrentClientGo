@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"log"
 	"net"
 	"time"
 )
@@ -31,12 +32,12 @@ func connectToPeerAndRequestWholePiece(conn net.Conn, fileIndex int, blockLength
 // Creates the tcp connection and dials up with the url, for now it's hardcoded to request to the port I know its opened, since I cannot make the port be good
 func createTcpConnection(ip string) (net.Conn, error) {
 	// Connect to the server
-	printWithColor(Yellow, fmt.Sprint(" Attempting to Connect: ", ip))
+	//printWithColor(Yellow, fmt.Sprint(" Attempting to Connect: ", ip))
 	conn, err := net.DialTimeout("tcp", ip, 2*time.Second)
 	if err != nil {
 		return nil, createError("createTcpConnection()", err.Error())
 	}
-	printWithColor(Yellow, fmt.Sprint(" Connected to: ", ip))
+	//printWithColor(Yellow, fmt.Sprint(" Connected to: ", ip))
 	return conn, nil
 }
 
@@ -79,16 +80,15 @@ func handleHandshake(infoHash []byte, peerID [20]byte, conn net.Conn) ([]byte, e
 	if err != nil {
 		return nil, createError("handleHandshake()", err.Error())
 	}
-	printWithColor(Green, "Hanshake succesfull")
+	printWithColor(Green, "Hanshake succesful")
 	return data, nil
 }
 
 func requestBlock(conn net.Conn, fileIndex int, blockOffset int, blockLength int) ([]byte, error) {
-	printWithColor(Red, fmt.Sprint("requesting index: ", fileIndex, " block offset: ", blockOffset))
+	//printWithColor(Red, fmt.Sprint("requesting index: ", fileIndex, " block offset: ", blockOffset))
 
 	//load the payload to send to the peer
 	var buff bytes.Buffer
-
 	//Size of the request (Message Length)
 	if err := binary.Write(&buff, binary.BigEndian, int32(13)); err != nil {
 		return nil, createError("requestBlock() Message Length ", err.Error())
@@ -109,7 +109,6 @@ func requestBlock(conn net.Conn, fileIndex int, blockOffset int, blockLength int
 	if err := binary.Write(&buff, binary.BigEndian, int32(blockLength)); err != nil {
 		return nil, createError("requestBlock() ", err.Error())
 	}
-
 	//send the payload requesting the file
 	n, err := conn.Write(buff.Bytes())
 	if n == 0 || err != nil {
@@ -117,12 +116,11 @@ func requestBlock(conn net.Conn, fileIndex int, blockOffset int, blockLength int
 	}
 
 	totalRead := 0
-	//response has to be around 40.000 bytes since each block of response is 16kb (16.000 bytes)
-	var response = make([]byte, 40000)
+	//response has to be around 20.000 bytes since each block of response is 16kb (16.000 bytes)
+	var block = make([]byte, 20000)
 
-	for totalRead < 16384 {
-
-		n, err = conn.Read(response)
+	for totalRead < 16397 {
+		n, err = conn.Read(block)
 		if err != nil {
 			return nil, createError("requestBlock() on conn.Write()", err.Error())
 		}
@@ -134,11 +132,41 @@ func requestBlock(conn net.Conn, fileIndex int, blockOffset int, blockLength int
 	//expectedFile := GetExpectedFile()[start+blockOffset : start+blockOffset+blockLength]
 	//filesDoMatch := reflect.DeepEqual(gottenFile, expectedFile)
 	//printWithColor(Yellow, fmt.Sprint("Match? ", filesDoMatch))
-	fmt.Println("")
-	fmt.Println("")
-	fmt.Println("")
-	fmt.Println("")
-	fmt.Println("")
 	//return only the data, not the metadata
-	return response[13:n], nil
+	return block[13:totalRead], nil
+}
+
+func ListenIncomingMessages(port int) {
+	ln, err := net.Listen("tcp", fmt.Sprint(":", port))
+
+	if err != nil {
+		log.Println("error on listening on port 6681")
+	}
+
+	for {
+		conn, err := ln.Accept()
+
+		if err != nil {
+			printWithColor(Red, fmt.Sprint("Connection could not be accepted"))
+		}
+
+		go handleAcceptedConnection(conn)
+
+	}
+
+}
+
+func handleAcceptedConnection(conn net.Conn) {
+	response := make([]byte, 30000)
+
+	for {
+		n, err := conn.Read(response)
+		if err != nil {
+			printWithColor(Red, fmt.Sprint("Connection could not be accepted"))
+		}
+		if n == 0 {
+			printWithColor(Blue, " Finished reading the response")
+		}
+	}
+
 }

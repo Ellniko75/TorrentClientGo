@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"log"
 	"math/rand"
@@ -157,7 +159,7 @@ func (this *TorrentFileToBuild) downloadFile() {
 		//get the file piece, the one thats composed by all the blocks and check if the hash is correct
 		data, err := this.askForFilePiece(fileIndex, this.AmountOfBlocks)
 		if err != nil {
-			printWithColor(Red, err.Error())
+			//printWithColor(Red, err.Error())
 			continue
 		}
 
@@ -166,19 +168,28 @@ func (this *TorrentFileToBuild) downloadFile() {
 		//hash of the whole piece except the first 5 bytes
 		alternativeHash := GetSha1Hash(data[5:])
 
+		fmt.Println("---------------------------------------------")
 		if reflect.DeepEqual(wholePieceSha1Hash, fileHash) {
 			this.File[fileIndex] = data
 			printWithColor(Green, " The whole piece hash and the OG hash match")
-			WriteToOkstxt()
+			WriteToOkstxt(fileIndex)
 
 		} else if reflect.DeepEqual(alternativeHash, fileHash) {
 			this.File[fileIndex] = data[5:]
 			printWithColor(Green, " The ALTERNATIVE piece hash and the OG hash match")
-			WriteToOkstxt()
+			//record the pieces downloaded
+			WriteToOkstxt(fileIndex)
 		} else {
 			printWithColor(Red, " the hashes don't match ")
-			WriteToErrorstxt()
+
+			//start := fileIndex * 131072
+			//expectedFile := GetExpectedFile()[start : start+131072]
+			//gotten := data
+			//startOfDiscrepancy := CheckPlacesWhereTheBytesAreDifferent(expectedFile, gotten[5:])
+			//record the errors
+			WriteToErrorstxt(fileIndex)
 		}
+		fmt.Println("---------------------------------------------")
 
 	}
 
@@ -207,4 +218,35 @@ func (this *TorrentFileToBuild) AddIpsThatHaveTheFile(ipsParsed []string) {
 		this.ipsWithTheFile = append(this.ipsWithTheFile, v)
 	}
 
+}
+
+func generatePeerID() ([20]byte, error) {
+
+	var peerId bytes.Buffer
+
+	firstPart := []byte("-Go1234-")
+	restOfTheString := []byte(randomString(12))
+
+	if err := binary.Write(&peerId, binary.BigEndian, firstPart); err != nil {
+		log.Println(err)
+	}
+	if err := binary.Write(&peerId, binary.BigEndian, restOfTheString); err != nil {
+		log.Println(err)
+	}
+
+	if len(peerId.Bytes()) != 20 {
+		return [20]byte(peerId.Bytes()), createError("generatePeerId()", " The peer ID is not 20 bytes long")
+	}
+
+	return [20]byte(peerId.Bytes()), nil
+}
+
+// Function to create a random string (for peer ID)
+func randomString(n int) string {
+	var letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+	s := make([]rune, n)
+	for i := range s {
+		s[i] = letters[time.Now().UnixNano()%int64(len(letters))]
+	}
+	return string(s)
 }

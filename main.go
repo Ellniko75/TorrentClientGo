@@ -1,14 +1,11 @@
 package main
 
 import (
-	"bytes"
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
-	"time"
 
 	"github.com/jackpal/bencode-go"
 )
@@ -34,8 +31,7 @@ type TorrentFileInfo struct {
 }
 
 func main() {
-
-	//time.Sleep(2 * time.Second)
+	ResetOksAndErrors()
 
 	file, err := os.Open("./torrents/xoka.torrent")
 	defer file.Close()
@@ -71,6 +67,7 @@ func main() {
 	TorrentFileToBuild.loadTrackers(&torrentInfo)
 	TorrentFileToBuild.CalculateTotalPiecesAndBlockLength(torrentInfo)
 	TorrentFileToBuild.getPeers()
+	printWithColor(Blue, " Creating Connections With Peers...")
 	TorrentFileToBuild.CreateConnections()
 	TorrentFileToBuild.downloadFile()
 
@@ -83,35 +80,4 @@ func getHexHash(torrentName string) (string, error) {
 	}
 	hexHash := string(output)
 	return hexHash, nil
-}
-
-func generatePeerID() ([20]byte, error) {
-
-	var peerId bytes.Buffer
-
-	firstPart := []byte("-Go1234-")
-	restOfTheString := []byte(randomString(12))
-
-	if err := binary.Write(&peerId, binary.BigEndian, firstPart); err != nil {
-		log.Println(err)
-	}
-	if err := binary.Write(&peerId, binary.BigEndian, restOfTheString); err != nil {
-		log.Println(err)
-	}
-
-	if len(peerId.Bytes()) != 20 {
-		return [20]byte(peerId.Bytes()), createError("generatePeerId()", " The peer ID is not 20 bytes long")
-	}
-
-	return [20]byte(peerId.Bytes()), nil
-}
-
-// Function to create a random string (for peer ID)
-func randomString(n int) string {
-	var letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-	s := make([]rune, n)
-	for i := range s {
-		s[i] = letters[time.Now().UnixNano()%int64(len(letters))]
-	}
-	return string(s)
 }

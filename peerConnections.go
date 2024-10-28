@@ -6,17 +6,18 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"time"
 )
 
-func connectToPeerAndRequestWholePiece(conn net.Conn, fileIndex int, blockLength int, amountOfBlocks int) ([]byte, error) {
+func connectToPeerAndRequestWholePiece(conn *Connection, fileIndex int, blockLength int, amountOfBlocks int) ([]byte, error) {
 
 	wholePiece := []byte{}
 	for i := 0; i < amountOfBlocks; i++ {
 		blockOffset := blockLength * i
 
 		//send the request for the data
-		data, err := requestBlock(conn, fileIndex, blockOffset, blockLength)
+		data, err := requestBlock(conn.Conn, fileIndex, blockOffset, blockLength)
 		if err != nil {
 			return nil, err
 		} else {
@@ -26,6 +27,19 @@ func connectToPeerAndRequestWholePiece(conn net.Conn, fileIndex int, blockLength
 	}
 	//for all the other pieces the peers do not send that 5 bytes, so que return the whole piece
 	return wholePiece, nil
+}
+func initiatePeerConnection(ip string, infoHash []byte, peerId [20]byte) (net.Conn, error) {
+	//create the connection based on the IP
+	connection, err := createTcpConnection(ip)
+	if err != nil {
+		return nil, err
+	}
+	_, err = handleHandshake(infoHash, peerId, connection)
+	if err != nil {
+		return nil, err
+	}
+
+	return connection, nil
 }
 
 // Creates the tcp connection and dials up with the url, for now it's hardcoded to request to the port I know its opened, since I cannot make the port be good
@@ -108,22 +122,46 @@ func requestBlock(conn net.Conn, fileIndex int, blockOffset int, blockLength int
 	if err := binary.Write(&buff, binary.BigEndian, int32(blockLength)); err != nil {
 		return nil, createError("requestBlock() ", err.Error())
 	}
+
+resendPacket:
 	//send the payload requesting the file
 	n, err := conn.Write(buff.Bytes())
 	if n == 0 || err != nil {
 		return nil, createError("requestBlock() on conn.Write()", err.Error())
 	}
-
-	totalRead := 0
+	//totalRead := 0
 	//response has to be around 20.000 bytes since each block of response is 16kb (16.000 bytes)
 	var block = make([]byte, 20000)
 
-	for totalRead < 16397 {
+	timeToError := time.Now().Add(3000 * time.Millisecond)
+	err = conn.SetReadDeadline(timeToError)
+	//if err != nil {
+	//	return nil, err
+	//}
+
+	for {
 		n, err = conn.Read(block)
 		if err != nil {
+			//if there is an error but we haven't tried twice yet, we try again
+			if os.IsTimeout(err) {
+				fmt.Println("TIME OUT: resendealo putaa")
+				goto resendPacket
+			}
 			return nil, createError("requestBlock() on conn.Write()", err.Error())
 		}
-		totalRead += n
+
+		//length := binary.BigEndian.Uint32(block[:4])
+		//index := binary.BigEndian.Uint32(block[6:10])
+		//begin := binary.BigEndian.Uint32(block[10:14])
+
+		//sometimes the connections sends just 5 random bytes instead of the actual data, so we just keep looping if that happens
+		if len(block[:n]) < 10 {
+			printWithColor(Yellow, " THIS SHIT IS NOT the data ")
+		}
+		if len(block[:n]) > 15000 {
+			return block[13:n], nil
+		}
+
 	}
 
 	//gottenFile := response[13:n]
@@ -132,40 +170,40 @@ func requestBlock(conn net.Conn, fileIndex int, blockOffset int, blockLength int
 	//filesDoMatch := reflect.DeepEqual(gottenFile, expectedFile)
 	//printWithColor(Yellow, fmt.Sprint("Match? ", filesDoMatch))
 	//return only the data, not the metadata
-	return block[13:totalRead], nil
+
+	//return block[13:totalRead], nil
+
 }
 
-func ListenIncomingMessages(port int) {
-	ln, err := net.Listen("tcp", fmt.Sprint(":", port))
-
+func listenToIncomingData(port int) {
+	fmt.Println("listening TO data on port ", port)
+	l, err := net.Listen("tcp", fmt.Sprint(":", port))
 	if err != nil {
-		log.Println("error on listening on port 6681")
+		log.Println(err)
 	}
 
 	for {
-		conn, err := ln.Accept()
-
+		conn, err := l.Accept()
 		if err != nil {
-			printWithColor(Red, fmt.Sprint("Connection could not be accepted"))
+			log.Println(err)
+			continue
 		}
-
-		go handleAcceptedConnection(conn)
-
+		go handleConnection(conn)
 	}
-
 }
+func handleConnection(conn net.Conn) {
+	var read = make([]byte, 30000)
 
-func handleAcceptedConnection(conn net.Conn) {
-	response := make([]byte, 30000)
-
-	for {
-		n, err := conn.Read(response)
-		if err != nil {
-			printWithColor(Red, fmt.Sprint("Connection could not be accepted"))
-		}
-		if n == 0 {
-			printWithColor(Blue, " Finished reading the response")
-		}
+	n, err := conn.Read(read)
+	fmt.Println("Data read")
+	if err != nil {
+		printWithColor(Red, fmt.Sprint("error on reading connection on handleConnection()", err.Error()))
+		return
 	}
+
+	if n == 0 {
+		log.Println("Finished this shit lmao")
+	}
+	printWithColor(Green, fmt.Sprint("Data gotten: ", read[:n]))
 
 }

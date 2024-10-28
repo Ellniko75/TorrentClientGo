@@ -1,0 +1,49 @@
+func (this *TorrentFileToBuild) CreateConnections() {
+	printWithColor(Blue, " Creating Connections")
+	var wg sync.WaitGroup
+
+	for _, v := range this.ipsWithTheFile {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			conn, err := createTcpConnection(v)
+			if err != nil {
+				printWithColor(Red, fmt.Sprint("Error on CreateConnections ", err.Error()))
+				return
+			}
+			PeerId, err := generatePeerID()
+			if err != nil {
+				printWithColor(Red, "Error generating peer id")
+				return
+			}
+			//send the handshake
+			_, err = handleHandshake(this.InfoHash, PeerId, conn)
+			if err != nil {
+				printWithColor(Red, "Error on handshake")
+				return
+			}
+			fmt.Println("Connection established")
+			this.Connections = append(this.Connections, Connection{Connection: conn, Using: 0})
+		}()
+		/*
+			conn, err := createTcpConnection(v)
+			if err != nil {
+				printWithColor(Red, fmt.Sprint("Error on CreateConnections ", err.Error()))
+				continue
+			}
+			PeerId, err := generatePeerID()
+			if err != nil {
+				printWithColor(Red, "Error generating peer id")
+				continue
+			}
+			//send the handshake
+			_, err = handleHandshake(this.InfoHash, PeerId, conn)
+			if err != nil {
+				printWithColor(Red, "Error on handshake")
+				continue
+			}
+			fmt.Println("Connection established")
+			this.Connections = append(this.Connections, conn)*/
+	}
+	wg.Wait()
+}

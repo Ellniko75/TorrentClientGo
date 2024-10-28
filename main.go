@@ -31,6 +31,7 @@ type TorrentFileInfo struct {
 }
 
 func main() {
+
 	ResetOksAndErrors()
 	torrentUrl := "./torrents/xoka.torrent"
 
@@ -46,7 +47,6 @@ func main() {
 	if err != nil {
 		log.Println("Error on unmarshaling")
 	}
-
 	fmt.Println("total length ", torrentInfo.Info.PieceLength)
 
 	//torrent that will be constructed
@@ -64,15 +64,15 @@ func main() {
 	}
 
 	TorrentFileToBuild.loadInfoHash(hash)
-	TorrentFileToBuild.loadHashes(&torrentInfo)
+	TorrentFileToBuild.LoadPieceHashes(&torrentInfo)
 	TorrentFileToBuild.loadTrackers(&torrentInfo)
 	TorrentFileToBuild.CalculateTotalPiecesAndBlockLength(torrentInfo)
 	TorrentFileToBuild.GetPeers()
-	TorrentFileToBuild.CreateConnections()
-	fmt.Println("LENGTH OF THE CONNECTIONS ACCEPTED: ", len(TorrentFileToBuild.Connections))
+
 	TorrentFileToBuild.downloadFile()
 
 }
+
 func getHexHash(torrentPath string) (string, error) {
 	cmd := exec.Command("python", "PythonScripts/CalculateHash.py", torrentPath)
 	output, err := cmd.Output()

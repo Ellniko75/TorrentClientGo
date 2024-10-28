@@ -83,3 +83,12 @@ func CheckPlacesWhereTheBytesAreDifferent(reference []byte, downloaded []byte) i
 	}
 	return 0
 }
+func contains(value string, slice []string) bool {
+
+	for _, v := range slice {
+		if v == value {
+			return true
+		}
+	}
+	return false
+}

@@ -69,7 +69,8 @@ func main() {
 	TorrentFileToBuild.CalculateTotalPiecesAndBlockLength(torrentInfo)
 	TorrentFileToBuild.GetPeers()
 
-	TorrentFileToBuild.downloadFile()
+	TorrentFileToBuild.downloadFileAsync()
+	//TorrentFileToBuild.downloadFile()
 
 }
 

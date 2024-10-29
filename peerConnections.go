@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os"
 	"time"
 )
 
+// Connects to the peer anr requests the whole file, block by block
 func connectToPeerAndRequestWholePiece(conn *Connection, fileIndex int, blockLength int, amountOfBlocks int) ([]byte, error) {
 
 	wholePiece := []byte{}
@@ -25,6 +25,7 @@ func connectToPeerAndRequestWholePiece(conn *Connection, fileIndex int, blockLen
 			wholePiece = append(wholePiece, data...)
 		}
 	}
+
 	//for all the other pieces the peers do not send that 5 bytes, so que return the whole piece
 	return wholePiece, nil
 }
@@ -97,7 +98,9 @@ func handleHandshake(infoHash []byte, peerID [20]byte, conn net.Conn) ([]byte, e
 	return data, nil
 }
 
+// Requests a block of a piece, normaly a piece is formed by various blocks
 func requestBlock(conn net.Conn, fileIndex int, blockOffset int, blockLength int) ([]byte, error) {
+
 	//printWithColor(Red, fmt.Sprint("requesting index: ", fileIndex, " block offset: ", blockOffset))
 
 	//load the payload to send to the peer
@@ -123,31 +126,38 @@ func requestBlock(conn net.Conn, fileIndex int, blockOffset int, blockLength int
 		return nil, createError("requestBlock() ", err.Error())
 	}
 
-resendPacket:
 	//send the payload requesting the file
 	n, err := conn.Write(buff.Bytes())
 	if n == 0 || err != nil {
 		return nil, createError("requestBlock() on conn.Write()", err.Error())
 	}
-	//totalRead := 0
-	//response has to be around 20.000 bytes since each block of response is 16kb (16.000 bytes)
-	var block = make([]byte, 20000)
 
-	timeToError := time.Now().Add(3000 * time.Millisecond)
-	err = conn.SetReadDeadline(timeToError)
-	//if err != nil {
-	//	return nil, err
-	//}
-
+	//clean up the connection if there is anything there yet
+	var response = make([]byte, 40000)
+	totalRead := 0
+	actualData := []byte{}
 	for {
-		n, err = conn.Read(block)
+		conn.SetReadDeadline(time.Now().Add(5000 * time.Millisecond))
+		n, err = conn.Read(response)
+		totalRead += n
+
+		if n == 5 {
+			fmt.Println("this is shit data that does not serve for anything", response[:n])
+			continue
+		}
+
+		actualData = append(actualData, response[:n]...)
+
 		if err != nil {
-			//if there is an error but we haven't tried twice yet, we try again
-			if os.IsTimeout(err) {
-				fmt.Println("TIME OUT: resendealo putaa")
-				goto resendPacket
+			if totalRead > 13 {
+				return actualData[13:], nil
 			}
+			//if there is an error but we haven't tried twice yet, we try again
 			return nil, createError("requestBlock() on conn.Write()", err.Error())
+		}
+
+		if totalRead > 15000 {
+			return actualData[13:], nil
 		}
 
 		//length := binary.BigEndian.Uint32(block[:4])
@@ -155,12 +165,9 @@ resendPacket:
 		//begin := binary.BigEndian.Uint32(block[10:14])
 
 		//sometimes the connections sends just 5 random bytes instead of the actual data, so we just keep looping if that happens
-		if len(block[:n]) < 10 {
-			printWithColor(Yellow, " THIS SHIT IS NOT the data ")
-		}
-		if len(block[:n]) > 15000 {
-			return block[13:n], nil
-		}
+		//if len(block[:n]) <= 10 {
+		//	printWithColor(Yellow, " THIS SHIT IS NOT the data ")
+		//}
 
 	}
 

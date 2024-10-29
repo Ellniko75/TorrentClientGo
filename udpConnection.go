@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"time"
 )
 
+// Creates udp connection with a timeout of 2 seconds
 func createUdpConnection(url string) (*net.UDPConn, error) {
 
 	// Resolve UDP address
@@ -25,6 +27,10 @@ func createUdpConnection(url string) (*net.UDPConn, error) {
 		fmt.Println("Error creating UDP connection:", err)
 		return nil, err
 	}
+
+	//Add a timeout for the connection
+	timeoutDuration := 2 * time.Second
+	conn.SetDeadline(time.Now().Add(timeoutDuration))
 	return conn, nil
 }
 
@@ -67,7 +73,7 @@ func initiateUdpConnection(conn *net.UDPConn, transactionID int32) (uint32, uint
 	return transactionIDResponse, connectionIDResponse, nil
 }
 
-func getPeers(conn *net.UDPConn, hash []byte, connectionId uint64, transactionID uint32, peerID [20]byte) ([]byte, int, error) {
+func getPeersFromUdp(conn *net.UDPConn, hash []byte, connectionId uint64, transactionID uint32, peerID [20]byte) ([]byte, int, error) {
 	currentFunctionName := "getPeers()"
 
 	if len(hash) != 20 {

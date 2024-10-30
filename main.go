@@ -70,16 +70,18 @@ func main() {
 
 	TorrentFileToBuild.downloadFileAsync()
 
-	data := TorrentFileToBuild.File[:555]
+	data := TorrentFileToBuild.File[:TorrentFileToBuild.TotalPieces+1]
 
 	ActualFile := []byte{}
 	for _, v := range data {
 		ActualFile = append(ActualFile, v...)
 	}
 
-	fmt.Print("total length of downloaded: ", len(ActualFile))
-
 	err = os.WriteFile("xokados.mp4", ActualFile, 0644)
+
+	f, _ := os.ReadFile("xokados.mp4")
+
+	fmt.Print("total length of downloaded: ", len(f))
 
 	//TorrentFileToBuild.downloadFile()
 

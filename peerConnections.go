@@ -16,17 +16,19 @@ func connectToPeerAndRequestWholePiece(conn *Connection, fileIndex int, torrentI
 
 	//if we are downloading the final piece, we have to adjust the block length, since it ususally happens that you cannot divide all files equally by 16kb
 	if final {
+
 		//we have to download the whole thing. but we have downloaded everything but the last piece
 		haveToDownload := torrentInfo.FileLength
+		//we calculate all the bytes downloaded up until the last piece (we use totalPieces and not totalPieces-1 because they start at index 0)
 		piecesSummedCalculation := torrentInfo.TotalPieces * torrentInfo.PieceSize
 
 		missing := haveToDownload - piecesSummedCalculation
-		alreadyGonnaDownload := torrentInfo.PieceSize
 
-		finalDownload := missing + alreadyGonnaDownload
-		BlockLength = finalDownload
-		AmountOfBlocks = 1
-		fmt.Println("finalDownload: ", finalDownload)
+		divisions := getDivisibleNumber(missing)
+
+		AmountOfBlocks = divisions
+
+		BlockLength = missing / AmountOfBlocks
 	}
 
 	wholePiece := []byte{}
@@ -34,10 +36,10 @@ func connectToPeerAndRequestWholePiece(conn *Connection, fileIndex int, torrentI
 		blockOffset := BlockLength * i
 
 		//send the request for the data
-		data, err := requestBlock(conn.Conn, fileIndex, blockOffset, BlockLength)
-		if err != nil {
-			return nil, err
-		}
+		data, _ := requestBlock(conn.Conn, fileIndex, blockOffset, BlockLength)
+		//if err != nil {
+		//	return nil, err
+		//}
 		//time.Sleep(1 * time.Second)
 		if len(data) > 0 {
 			wholePiece = append(wholePiece, data...)
@@ -165,10 +167,6 @@ func requestBlock(conn net.Conn, fileIndex int, blockOffset int, blockLength int
 		}
 
 		actualData = append(actualData, response[:n]...)
-
-		if fileIndex == 554 {
-			fmt.Println("554: ", response[:n])
-		}
 
 		if err != nil {
 			//if there is an error but we haven't tried twice yet, we try again

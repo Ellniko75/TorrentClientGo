@@ -47,7 +47,6 @@ func main() {
 	if err != nil {
 		log.Println("Error on unmarshaling")
 	}
-	fmt.Println("total length ", torrentInfo.Info.PieceLength)
 
 	//torrent that will be constructed
 
@@ -70,6 +69,18 @@ func main() {
 	TorrentFileToBuild.GetPeers()
 
 	TorrentFileToBuild.downloadFileAsync()
+
+	data := TorrentFileToBuild.File[:555]
+
+	ActualFile := []byte{}
+	for _, v := range data {
+		ActualFile = append(ActualFile, v...)
+	}
+
+	fmt.Print("total length of downloaded: ", len(ActualFile))
+
+	err = os.WriteFile("xokados.mp4", ActualFile, 0644)
+
 	//TorrentFileToBuild.downloadFile()
 
 }

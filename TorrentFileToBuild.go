@@ -26,6 +26,7 @@ type TorrentFileToBuild struct {
 	InfoHash       []byte
 	FileLength     int
 	File           [100000][]byte //property to write the file when the pieces arrive
+
 }
 
 type Hash struct {
@@ -192,8 +193,10 @@ func (this *TorrentFileToBuild) downloadFileAsync() {
 			defer w.Done()
 			printWithColor(Blue, fmt.Sprint("Downloading Piece: ", fileIndex))
 
+			final := fileIndex == this.TotalPieces
+
 			//get the file piece, the one thats composed by all the blocks and check if the hash is correct
-			data, err := this.askForFilePiece(fileIndex, v.Hash, connectionToUse)
+			data, err := this.askForFilePiece(fileIndex, v.Hash, connectionToUse, final)
 			if err != nil {
 				printWithColor(Red, err.Error())
 				WriteToErrorstxt(fileIndex)
@@ -201,6 +204,7 @@ func (this *TorrentFileToBuild) downloadFileAsync() {
 			}
 			printWithColor(Green, fmt.Sprint("Downloaded piece: ", fileIndex))
 			printWithColor(Green, fmt.Sprint(" Hash match on file ", " fileIndex"))
+			time.Sleep(3 * time.Second)
 			//set completed to true
 			v.Completed = true
 			this.File[fileIndex] = data
@@ -218,6 +222,8 @@ func (this *TorrentFileToBuild) downloadFileAsync() {
 	w.Wait()
 
 }
+
+/*
 func (this *TorrentFileToBuild) downloadFile() {
 
 	//loop all the pieces and request them
@@ -233,7 +239,7 @@ func (this *TorrentFileToBuild) downloadFile() {
 		printWithColor(Blue, fmt.Sprint("Downloading Piece: ", fileIndex))
 
 		//get the file piece, the one thats composed by all the blocks and check if the hash is correct
-		data, err := this.askForFilePiece(fileIndex, v.Hash, connectionToUse)
+		data, err := this.askForFilePiece(fileIndex, v.Hash, connectionToUse, false)
 		if err != nil {
 			printWithColor(Red, err.Error())
 			WriteToErrorstxt(fileIndex)
@@ -255,7 +261,7 @@ func (this *TorrentFileToBuild) downloadFile() {
 		//time.Sleep(2 * time.Second)
 	}
 
-}
+}*/
 
 func (this *TorrentFileToBuild) DownloadMissingPieces() {
 
@@ -277,10 +283,9 @@ func (this *TorrentFileToBuild) GetUnusedConnection() *Connection {
 }
 
 // Requests the file piece and checks if the hash is okay
-func (this *TorrentFileToBuild) askForFilePiece(fileIndex int, fileHash []byte, connectionToUse *Connection) ([]byte, error) {
-
+func (this *TorrentFileToBuild) askForFilePiece(fileIndex int, fileHash []byte, connectionToUse *Connection, Final bool) ([]byte, error) {
 	//download the piece
-	data, err := connectToPeerAndRequestWholePiece(connectionToUse, fileIndex, this.BlockLength, this.AmountOfBlocks)
+	data, err := connectToPeerAndRequestWholePiece(connectionToUse, fileIndex, this, Final)
 	connectionToUse.mu.Unlock()
 	connectionToUse.Using = false
 	if err != nil {

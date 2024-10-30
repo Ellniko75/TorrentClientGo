@@ -4,24 +4,42 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"log"
 	"net"
 	"time"
 )
 
 // Connects to the peer anr requests the whole file, block by block
-func connectToPeerAndRequestWholePiece(conn *Connection, fileIndex int, blockLength int, amountOfBlocks int) ([]byte, error) {
+func connectToPeerAndRequestWholePiece(conn *Connection, fileIndex int, torrentInfo *TorrentFileToBuild, final bool) ([]byte, error) {
+
+	AmountOfBlocks := torrentInfo.AmountOfBlocks
+	BlockLength := torrentInfo.BlockLength
+
+	//if we are downloading the final piece, we have to adjust the block length, since it ususally happens that you cannot divide all files equally by 16kb
+	if final {
+		//we have to download the whole thing. but we have downloaded everything but the last piece
+		haveToDownload := torrentInfo.FileLength
+		piecesSummedCalculation := torrentInfo.TotalPieces * torrentInfo.PieceSize
+
+		missing := haveToDownload - piecesSummedCalculation
+		alreadyGonnaDownload := torrentInfo.PieceSize
+
+		finalDownload := missing + alreadyGonnaDownload
+		BlockLength = finalDownload
+		AmountOfBlocks = 1
+		fmt.Println("finalDownload: ", finalDownload)
+	}
 
 	wholePiece := []byte{}
-	for i := 0; i < amountOfBlocks; i++ {
-		blockOffset := blockLength * i
+	for i := 0; i < AmountOfBlocks; i++ {
+		blockOffset := BlockLength * i
 
 		//send the request for the data
-		data, err := requestBlock(conn.Conn, fileIndex, blockOffset, blockLength)
+		data, err := requestBlock(conn.Conn, fileIndex, blockOffset, BlockLength)
 		if err != nil {
 			return nil, err
-		} else {
-			//time.Sleep(1 * time.Second)
+		}
+		//time.Sleep(1 * time.Second)
+		if len(data) > 0 {
 			wholePiece = append(wholePiece, data...)
 		}
 	}
@@ -133,11 +151,11 @@ func requestBlock(conn net.Conn, fileIndex int, blockOffset int, blockLength int
 	}
 
 	//clean up the connection if there is anything there yet
-	var response = make([]byte, 40000)
+	var response = make([]byte, 1000000)
 	totalRead := 0
 	actualData := []byte{}
 	for {
-		conn.SetReadDeadline(time.Now().Add(5000 * time.Millisecond))
+		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 		n, err = conn.Read(response)
 		totalRead += n
 
@@ -148,15 +166,16 @@ func requestBlock(conn net.Conn, fileIndex int, blockOffset int, blockLength int
 
 		actualData = append(actualData, response[:n]...)
 
+		if fileIndex == 554 {
+			fmt.Println("554: ", response[:n])
+		}
+
 		if err != nil {
-			if totalRead > 13 {
-				return actualData[13:], nil
-			}
 			//if there is an error but we haven't tried twice yet, we try again
 			return nil, createError("requestBlock() on conn.Write()", err.Error())
 		}
 
-		if totalRead > 15000 {
+		if totalRead >= blockLength {
 			return actualData[13:], nil
 		}
 
@@ -179,38 +198,5 @@ func requestBlock(conn net.Conn, fileIndex int, blockOffset int, blockLength int
 	//return only the data, not the metadata
 
 	//return block[13:totalRead], nil
-
-}
-
-func listenToIncomingData(port int) {
-	fmt.Println("listening TO data on port ", port)
-	l, err := net.Listen("tcp", fmt.Sprint(":", port))
-	if err != nil {
-		log.Println(err)
-	}
-
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			log.Println(err)
-			continue
-		}
-		go handleConnection(conn)
-	}
-}
-func handleConnection(conn net.Conn) {
-	var read = make([]byte, 30000)
-
-	n, err := conn.Read(read)
-	fmt.Println("Data read")
-	if err != nil {
-		printWithColor(Red, fmt.Sprint("error on reading connection on handleConnection()", err.Error()))
-		return
-	}
-
-	if n == 0 {
-		log.Println("Finished this shit lmao")
-	}
-	printWithColor(Green, fmt.Sprint("Data gotten: ", read[:n]))
 
 }

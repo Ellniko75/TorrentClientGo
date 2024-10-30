@@ -92,3 +92,12 @@ func contains(value string, slice []string) bool {
 	}
 	return false
 }
+
+func getDivisibleNumber(number int) int {
+	for i := 3; i < 10000; i++ {
+		if number%i == 0 {
+			return i
+		}
+	}
+	return 0
+}

@@ -72,7 +72,7 @@ func (this *TorrentFileToBuild) CalculateTotalPiecesAndBlockLength(info *Torrent
 
 	printWithColor(Red, fmt.Sprint("FILE TOTAL SIZE: ", this.FileLength))
 	printWithColor(Red, fmt.Sprint("Pieces size: ", this.PieceSize))
-	printWithColor(Red, fmt.Sprint("Total pieces: ", this.TotalPieces))
+	printWithColor(Red, fmt.Sprint("Total pieces: ", this.TotalPieces+1)) //need to add +1 since its an index that starts counting form 0
 	printWithColor(Red, fmt.Sprint("Block size: ", this.BlockLength))
 	printWithColor(Red, fmt.Sprint("Amount of blocks: ", this.AmountOfBlocks))
 	if this.FileLength == 0 {
@@ -84,7 +84,6 @@ func (this *TorrentFileToBuild) loadTrackers(torrentInfo *TorrentFileInfo) {
 	this.MainTracker = torrentInfo.Announce
 	for _, tracker := range torrentInfo.AnnounceList {
 		trackerToStr := strings.Join(tracker, "")
-
 		this.ListOfTrackers = append(this.ListOfTrackers, trackerToStr)
 	}
 }
@@ -322,7 +321,9 @@ func (this *TorrentFileToBuild) writeFileToDisk(directory string) error {
 	}
 
 	err := os.WriteFile(fmt.Sprint(directory, "/", this.Name), toWrite, 0644)
+	fmt.Println("NAME: ", this.Name)
 	if err != nil {
+		log.Println(err)
 		return err
 	}
 	return nil

@@ -33,7 +33,7 @@ type TorrentFileInfo struct {
 
 func main() {
 	ResetOksAndErrors()
-	torrentUrl := "../torrents/xoka.torrent"
+	torrentUrl := "../torrents/foto.torrent"
 
 	file, err := os.Open(torrentUrl)
 	defer file.Close()
@@ -60,7 +60,6 @@ func main() {
 		log.Println(err)
 	}
 	fmt.Println(Yellow, "HASH: ", hash)
-
 	TorrentFileToBuild.loadInfoHash(hash)
 	TorrentFileToBuild.loadName(&torrentInfo)
 	TorrentFileToBuild.LoadPieceHashes(&torrentInfo)
@@ -68,7 +67,7 @@ func main() {
 	TorrentFileToBuild.CalculateTotalPiecesAndBlockLength(&torrentInfo)
 	TorrentFileToBuild.GetPeers()
 	TorrentFileToBuild.downloadFileAsync()
-	TorrentFileToBuild.writeFileToDisk("./output")
+	TorrentFileToBuild.writeFileToDisk("../output")
 
 	//TorrentFileToBuild.downloadFile()
 }

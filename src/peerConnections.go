@@ -13,12 +13,11 @@ func connectToPeerAndRequestWholePiece(conn *Connection, fileIndex int, torrentI
 
 	AmountOfBlocks := torrentInfo.AmountOfBlocks
 	BlockLength := torrentInfo.BlockLength
-
 	//if we are downloading the final piece, we have to adjust the block length, since it usually happens that you cannot divide all files equally by 16kb
 	if final {
 		//we have to download the whole thing. but we have downloaded everything but the last piece
 		haveToDownload := torrentInfo.FileLength
-		//we calculate all the bytes downloaded up until the last piece (we use totalPieces and not totalPieces-1 because they start at index 0)
+		//we calculate all the bytes downloaded up until the last piece (we use totalPieces and not totalPieces-1 because its an index and they start at index 0)
 		piecesSummedCalculation := torrentInfo.TotalPieces * torrentInfo.PieceSize
 		missing := haveToDownload - piecesSummedCalculation
 		divisions := getDivisibleNumber(missing)

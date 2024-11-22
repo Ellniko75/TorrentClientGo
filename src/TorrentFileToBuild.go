@@ -27,7 +27,8 @@ type TorrentFileToBuild struct {
 	ListOfHashes   []Hash   //hashes for each piece of the file
 	InfoHash       []byte
 	FileLength     int
-	File           [100000][]byte //property to write the file when the pieces arrive
+	File           [10000000][]byte //property to write the file when the pieces arrive
+	WholeFile      []byte
 }
 
 type Hash struct {
@@ -47,7 +48,6 @@ type Connection struct {
 	mu      sync.Mutex
 }
 
-// TODO: for now it loads the infohash forcefully, because this library is complete shit and cannot for the life of it calculate the infohash
 func (this *TorrentFileToBuild) LoadPieceHashes(torrentInfo *TorrentFileInfo) {
 	hashLen := 20 //sha1 length
 	for i := 0; i < len(torrentInfo.Info.Pieces); i += hashLen {
@@ -56,12 +56,19 @@ func (this *TorrentFileToBuild) LoadPieceHashes(torrentInfo *TorrentFileInfo) {
 	}
 }
 
+func (this *TorrentFileToBuild) LoadPieceHashesForMultipleFileTorrent(hashes string) {
+	hashLen := 20 //sha1 length
+	for i := 0; i < len(hashes); i += hashLen {
+		currentHash := hashes[i : i+hashLen]
+		this.ListOfHashes = append(this.ListOfHashes, Hash{Hash: []byte(currentHash), Completed: false})
+	}
+}
+
 func (this *TorrentFileToBuild) loadInfoHash(hash []byte) {
 	this.InfoHash = hash
-
 }
-func (this *TorrentFileToBuild) loadName(torrentInfo *TorrentFileInfo) {
-	this.Name = torrentInfo.Info.Name
+func (this *TorrentFileToBuild) loadName(name string) {
+	this.Name = name
 }
 func (this *TorrentFileToBuild) CalculateTotalPiecesAndBlockLength(info *TorrentFileInfo) {
 	this.FileLength = info.Info.Length
@@ -75,9 +82,9 @@ func (this *TorrentFileToBuild) CalculateTotalPiecesAndBlockLength(info *Torrent
 	printWithColor(Red, fmt.Sprint("Total pieces: ", this.TotalPieces+1)) //need to add +1 since its an index that starts counting form 0
 	printWithColor(Red, fmt.Sprint("Block size: ", this.BlockLength))
 	printWithColor(Red, fmt.Sprint("Amount of blocks: ", this.AmountOfBlocks))
-	if this.FileLength == 0 {
-		log.Panic("ERROR ON READING THE FILE LENGTH, FOR NOW THIS ONLY SUPPORTS SINGLE FILE DOWNLOADING")
-	}
+	//if this.FileLength == 0 {
+	//	log.Panic("ERROR ON READING THE FILE LENGTH, FOR NOW THIS ONLY SUPPORTS SINGLE FILE DOWNLOADING")
+	//}
 }
 
 func (this *TorrentFileToBuild) loadTrackers(torrentInfo *TorrentFileInfo) {
@@ -181,6 +188,7 @@ func (this *TorrentFileToBuild) downloadFileAsync() {
 	var w sync.WaitGroup
 	//loop all the pieces and request them
 	for fileIndex, v := range this.ListOfHashes {
+
 		if v.Completed {
 			continue
 		}
@@ -211,18 +219,13 @@ func (this *TorrentFileToBuild) downloadFileAsync() {
 			v.Completed = true
 			this.File[fileIndex] = data
 		}()
-
-		//start := fileIndex * 131072
-		//expectedFile := GetExpectedFile()[start : start+131072]
-		//gotten := data
-		//startOfDiscrepancy := CheckPlacesWhereTheBytesAreDifferent(expectedFile, gotten[5:])
-		//record the errors
-		//fmt.Println("length expected: ", len(expectedFile))
-		//fmt.Println("length gotten: ", len(data))
-		//time.Sleep(2 * time.Second)
 	}
 	w.Wait()
-
+	//get the pieces of all the file and store it in WholePiece
+	data := this.File[:this.TotalPieces+1]
+	for _, v := range data {
+		this.WholeFile = append(this.WholeFile, v...)
+	}
 }
 
 /*
@@ -264,10 +267,6 @@ func (this *TorrentFileToBuild) downloadFile() {
 	}
 
 }*/
-
-func (this *TorrentFileToBuild) DownloadMissingPieces() {
-
-}
 
 // runs on main thread, constantly checking if there are any connection up for use
 func (this *TorrentFileToBuild) GetUnusedConnection() *Connection {
@@ -313,15 +312,20 @@ func (this *TorrentFileToBuild) askForFilePiece(fileIndex int, fileHash []byte, 
 	return nil, createError("askForFilePiece()", fmt.Sprint("THE HASH DIDN'T MATCH, FILE: ", fileIndex, " LENGTH GOTTEN: ", len(data)))
 }
 func (this *TorrentFileToBuild) writeFileToDisk(directory string) error {
-	data := this.File[:this.TotalPieces+1]
 
-	toWrite := []byte{}
-	for _, v := range data {
-		toWrite = append(toWrite, v...)
-	}
-
-	err := os.WriteFile(fmt.Sprint(directory, "/", this.Name), toWrite, 0644)
+	err := os.WriteFile(fmt.Sprint(directory, this.Name), this.WholeFile, 0644)
 	fmt.Println("NAME: ", this.Name)
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+	return nil
+}
+
+// this one needs the whole path to write the file, including the file name
+func (this *TorrentFileToBuild) writePieceOfFileToDisk(fullDirectory string, from int, end int) error {
+
+	err := os.WriteFile(fmt.Sprint(fullDirectory), this.WholeFile[from:end], 0644)
 	if err != nil {
 		log.Println(err)
 		return err

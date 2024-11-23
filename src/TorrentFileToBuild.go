@@ -325,6 +325,17 @@ func (this *TorrentFileToBuild) writeFileToDisk(directory string) error {
 // this one needs the whole path to write the file, including the file name
 func (this *TorrentFileToBuild) writePieceOfFileToDisk(fullDirectory string, from int, end int) error {
 
+	//ensue the path exists, if not create it
+
+	toArr := strings.Split(fullDirectory, "/")
+	fmt.Println("toarr:::", toArr)
+	pathWithoutTheFileName := strings.Join(toArr[:len(toArr)-1], "/")
+
+	if _, err := os.Stat(pathWithoutTheFileName); os.IsNotExist(err) {
+		err = os.MkdirAll(pathWithoutTheFileName, 0700)
+		fmt.Println("Created the directory: ", pathWithoutTheFileName)
+	}
+
 	err := os.WriteFile(fmt.Sprint(fullDirectory), this.WholeFile[from:end], 0644)
 	if err != nil {
 		log.Println(err)

@@ -38,7 +38,7 @@ type TorrentFileInfo struct {
 
 func main() {
 	ResetOksAndErrors()
-	torrentUrl := "../torrents/xoka.torrent"
+	torrentUrl := "../torrents/torrentCustom.torrent"
 
 	file, err := os.Open(torrentUrl)
 	defer file.Close()
@@ -102,11 +102,7 @@ func main() {
 			TorrentFileToBuild.writePieceOfFileToDisk(fmt.Sprint("../output/", currentFilePath), start, end)
 			start += v.Length
 		}
-		//TorrentFileToBuild.downloadFileAsync()
-		//TorrentFileToBuild.writeFileToDisk("../output/")
-
 	}
-
 }
 
 func getHexHash(torrentPath string) (string, error) {

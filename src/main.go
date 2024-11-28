@@ -38,7 +38,7 @@ type TorrentFileInfo struct {
 
 func main() {
 	ResetOksAndErrors()
-	torrentUrl := "../torrents/torrentCustom.torrent"
+	torrentUrl := "../torrents/xoka.torrent"
 
 	file, err := os.Open(torrentUrl)
 	defer file.Close()

@@ -213,37 +213,40 @@ func (this *TorrentFileToBuild) allFilesAreDownloaded() bool {
 // Blocks form a Piece, and Pieces form the file
 func (this *TorrentFileToBuild) downloadFileAsync() {
 	var w sync.WaitGroup
-	//loop all the pieces and request them
-	for fileIndex, v := range this.ListOfHashes {
-		if v.Completed {
-			continue
-		}
-		//get any connection that is not being currently used
-		connectionToUse := this.GetUnusedConnection()
-		connectionToUse.Using = true
-		go func() {
-			w.Add(1)
-			defer w.Done()
-			//check if this is the final piece
-			final := fileIndex == this.TotalPieces
-			//get the file piece, the one thats composed by all the blocks and check if the hash is correct
-			data, err := this.askForFilePiece(fileIndex, v.Hash, connectionToUse, final)
-			if err != nil {
-				printWithColor(Red, err.Error())
-				WriteToErrorstxt(fileIndex)
-				return
+	for {
+		//loop all the pieces and request them
+		for fileIndex, v := range this.ListOfHashes {
+			if v.Completed {
+				continue
 			}
-			//Show completed message
-			printWithColor(Green, fmt.Sprint(" Hash match on file ", fileIndex))
-			//set completed to true - need to do it like this, because v is a copy of the value and not a reference
-			this.ListOfHashes[fileIndex].Completed = true
-			this.File[fileIndex] = data
-		}()
+			//get any connection that is not being currently used
+			connectionToUse := this.GetUnusedConnection()
+			connectionToUse.Using = true
+			go func() {
+				w.Add(1)
+				defer w.Done()
+				//check if this is the final piece
+				final := fileIndex == this.TotalPieces
+				//get the file piece, the one thats composed by all the blocks and check if the hash is correct
+				data, err := this.askForFilePiece(fileIndex, v.Hash, connectionToUse, final)
+				if err != nil {
+					printWithColor(Red, err.Error())
+					WriteToErrorstxt(fileIndex)
+					return
+				}
+				//Show completed message
+				printWithColor(Green, fmt.Sprint(" Hash match on file ", fileIndex))
+				//set completed to true - need to do it like this, because v is a copy of the value and not a reference
+				this.ListOfHashes[fileIndex].Completed = true
+				this.File[fileIndex] = data
+			}()
+		}
+		if this.allFilesAreDownloaded() {
+			break
+		}
 	}
+
 	w.Wait()
-	if !this.allFilesAreDownloaded() {
-		this.downloadFileAsync()
-	}
 	//get the pieces of all the file and store it in WholePiece
 	data := this.File[:this.TotalPieces+1]
 	for _, v := range data {

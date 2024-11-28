@@ -35,7 +35,6 @@ type Hash struct {
 	Hash      []byte
 	Completed bool
 }
-
 type Connections struct {
 	Conns []Connection
 	mu    sync.Mutex
@@ -56,18 +55,10 @@ func (this *TorrentFileToBuild) LoadPieceHashes(torrentInfo *TorrentFileInfo) {
 	}
 }
 
-func (this *TorrentFileToBuild) LoadPieceHashesForMultipleFileTorrent(hashes string) {
-	hashLen := 20 //sha1 length
-	for i := 0; i < len(hashes); i += hashLen {
-		currentHash := hashes[i : i+hashLen]
-		this.ListOfHashes = append(this.ListOfHashes, Hash{Hash: []byte(currentHash), Completed: false})
-	}
-}
-
-func (this *TorrentFileToBuild) loadInfoHash(hash []byte) {
+func (this *TorrentFileToBuild) LoadInfoHash(hash []byte) {
 	this.InfoHash = hash
 }
-func (this *TorrentFileToBuild) loadName(name string) {
+func (this *TorrentFileToBuild) LoadName(name string) {
 	this.Name = name
 }
 func (this *TorrentFileToBuild) CalculateTotalPiecesAndBlockLength(info *TorrentFileInfo) {
@@ -87,7 +78,22 @@ func (this *TorrentFileToBuild) CalculateTotalPiecesAndBlockLength(info *Torrent
 	//}
 }
 
-func (this *TorrentFileToBuild) loadTrackers(torrentInfo *TorrentFileInfo) {
+// this is the same as CalculateTotalPiecesAndBlockLength but it receives the information separated instead of as a TorrentFileInfo pointer
+func (this *TorrentFileToBuild) LoadMetaData(fileLength int, pieceSize int) {
+	this.FileLength = fileLength
+	this.PieceSize = pieceSize
+	this.TotalPieces = this.FileLength / this.PieceSize
+	this.BlockLength = 16384
+	this.AmountOfBlocks = this.PieceSize / this.BlockLength //Calculate the amount of blocks per piece
+
+	printWithColor(Red, fmt.Sprint("FILE TOTAL SIZE: ", this.FileLength))
+	printWithColor(Red, fmt.Sprint("Pieces size: ", this.PieceSize))
+	printWithColor(Red, fmt.Sprint("Total pieces: ", this.TotalPieces+1)) //need to add +1 since its an index that starts counting form 0
+	printWithColor(Red, fmt.Sprint("Block size: ", this.BlockLength))
+	printWithColor(Red, fmt.Sprint("Amount of blocks: ", this.AmountOfBlocks))
+}
+
+func (this *TorrentFileToBuild) LoadTrackers(torrentInfo *TorrentFileInfo) {
 	this.MainTracker = torrentInfo.Announce
 	for _, tracker := range torrentInfo.AnnounceList {
 		trackerToStr := strings.Join(tracker, "")
@@ -97,7 +103,6 @@ func (this *TorrentFileToBuild) loadTrackers(torrentInfo *TorrentFileInfo) {
 
 // Loop all the torrent trackers and get the peers that have the file
 func (this *TorrentFileToBuild) GetPeers() {
-
 	for _, tracker := range this.ListOfTrackers {
 		if tracker[:3] == "udp" {
 			//Adjust the format of the UDP tracker URL
@@ -106,6 +111,7 @@ func (this *TorrentFileToBuild) GetPeers() {
 
 			//create udp connection for the UDP tracker
 			conn, err := createUdpConnection(trackerURL)
+			defer conn.Close()
 			if err != nil {
 				printWithColor(Red, err.Error())
 				continue
@@ -141,30 +147,42 @@ func (this *TorrentFileToBuild) GetPeers() {
 			TrackerResponseParsed.Create(trackerAnnounceResponse)
 			TrackerResponseParsed.Print()
 			ipsAndPorts := TrackerResponseParsed.getIpAndPorts()
-
 			printWithColor(Green, "ADDING NEW PEERS...")
 			//we only add the ips and ports if they actually are responsive
-
 			//create all the connections and add them to the slice
 			var w sync.WaitGroup
+			this.Connections.mu.Lock()
 			for _, v := range ipsAndPorts {
 				go func() {
 					w.Add(1)
 					defer w.Done()
 					this.AddConnection(v, peerID)
-
 				}()
 			}
 			w.Wait()
-			//CLOSE THE CONNECTION
-			conn.Close()
+			this.Connections.mu.Unlock()
 		}
 	}
+}
+func (this *TorrentFileToBuild) pollGetPeersEveryCoupleMinutes() {
+	go func() {
+		for {
+			if this.allFilesAreDownloaded() {
+				return
+			}
+
+			this.GetPeers()
+
+			time.Sleep(10 * time.Second)
+
+		}
+
+	}()
 }
 
 // Creates the connections if they are not repeated and adds them to the slice
 func (this *TorrentFileToBuild) AddConnection(ipAndPort string, peerID [20]byte) {
-	if this.isIpRepeated(ipAndPort) {
+	if this.isIpRepeatedAndHealthy(ipAndPort) {
 		return
 	}
 	conn, err := initiatePeerConnection(ipAndPort, this.InfoHash, peerID)
@@ -173,14 +191,23 @@ func (this *TorrentFileToBuild) AddConnection(ipAndPort string, peerID [20]byte)
 	}
 	this.Connections.Conns = append(this.Connections.Conns, Connection{Conn: conn, Using: false, Ip: ipAndPort, Healthy: true})
 }
-func (this *TorrentFileToBuild) isIpRepeated(ip string) bool {
+func (this *TorrentFileToBuild) isIpRepeatedAndHealthy(ip string) bool {
 	for i := 0; i < len(this.Connections.Conns); i++ {
 		currentIP := this.Connections.Conns[i].Ip
-		if ip == currentIP {
+		isHealthy := this.Connections.Conns[i].Healthy
+		if ip == currentIP && isHealthy {
 			return true
 		}
 	}
 	return false
+}
+func (this *TorrentFileToBuild) allFilesAreDownloaded() bool {
+	for _, v := range this.ListOfHashes {
+		if !v.Completed {
+			return false
+		}
+	}
+	return true
 }
 
 // Blocks form a Piece, and Pieces form the file
@@ -188,23 +215,17 @@ func (this *TorrentFileToBuild) downloadFileAsync() {
 	var w sync.WaitGroup
 	//loop all the pieces and request them
 	for fileIndex, v := range this.ListOfHashes {
-
 		if v.Completed {
 			continue
 		}
 		//get any connection that is not being currently used
 		connectionToUse := this.GetUnusedConnection()
-		connectionToUse.mu.Lock()
 		connectionToUse.Using = true
-
 		go func() {
 			w.Add(1)
 			defer w.Done()
-			printWithColor(Blue, fmt.Sprint("Downloading Piece: ", fileIndex))
-
 			//check if this is the final piece
 			final := fileIndex == this.TotalPieces
-
 			//get the file piece, the one thats composed by all the blocks and check if the hash is correct
 			data, err := this.askForFilePiece(fileIndex, v.Hash, connectionToUse, final)
 			if err != nil {
@@ -212,61 +233,23 @@ func (this *TorrentFileToBuild) downloadFileAsync() {
 				WriteToErrorstxt(fileIndex)
 				return
 			}
-			printWithColor(Green, fmt.Sprint("Downloaded piece: ", fileIndex))
-			printWithColor(Green, fmt.Sprint(" Hash match on file ", " fileIndex"))
-			time.Sleep(3 * time.Second)
-			//set completed to true
-			v.Completed = true
+			//Show completed message
+			printWithColor(Green, fmt.Sprint(" Hash match on file ", fileIndex))
+			//set completed to true - need to do it like this, because v is a copy of the value and not a reference
+			this.ListOfHashes[fileIndex].Completed = true
 			this.File[fileIndex] = data
 		}()
 	}
 	w.Wait()
+	if !this.allFilesAreDownloaded() {
+		this.downloadFileAsync()
+	}
 	//get the pieces of all the file and store it in WholePiece
 	data := this.File[:this.TotalPieces+1]
 	for _, v := range data {
 		this.WholeFile = append(this.WholeFile, v...)
 	}
 }
-
-/*
-func (this *TorrentFileToBuild) downloadFile() {
-
-	//loop all the pieces and request them
-	for fileIndex, v := range this.ListOfHashes {
-		if v.Completed {
-			continue
-		}
-		//get any connection that is not being currently used
-		connectionToUse := this.GetUnusedConnection()
-		connectionToUse.Using = true
-		connectionToUse.mu.Lock()
-
-		printWithColor(Blue, fmt.Sprint("Downloading Piece: ", fileIndex))
-
-		//get the file piece, the one thats composed by all the blocks and check if the hash is correct
-		data, err := this.askForFilePiece(fileIndex, v.Hash, connectionToUse, false)
-		if err != nil {
-			printWithColor(Red, err.Error())
-			WriteToErrorstxt(fileIndex)
-			continue
-		}
-		printWithColor(Green, fmt.Sprint("Downloaded piece: ", fileIndex))
-		printWithColor(Green, fmt.Sprint(" Hash match on file ", " fileIndex"))
-		//set completed to true
-		v.Completed = true
-		this.File[fileIndex] = data
-
-		//start := fileIndex * 131072
-		//expectedFile := GetExpectedFile()[start : start+131072]
-		//gotten := data
-		//startOfDiscrepancy := CheckPlacesWhereTheBytesAreDifferent(expectedFile, gotten[5:])
-		//record the errors
-		//fmt.Println("length expected: ", len(expectedFile))
-		//fmt.Println("length gotten: ", len(data))
-		//time.Sleep(2 * time.Second)
-	}
-
-}*/
 
 // runs on main thread, constantly checking if there are any connection up for use
 func (this *TorrentFileToBuild) GetUnusedConnection() *Connection {
@@ -285,15 +268,12 @@ func (this *TorrentFileToBuild) GetUnusedConnection() *Connection {
 func (this *TorrentFileToBuild) askForFilePiece(fileIndex int, fileHash []byte, connectionToUse *Connection, Final bool) ([]byte, error) {
 	//download the piece
 	data, err := connectToPeerAndRequestWholePiece(connectionToUse, fileIndex, this, Final)
-	connectionToUse.mu.Unlock()
 	connectionToUse.Using = false
 	//if there was an error mark the connection as unhealthy
 	if err != nil {
 		connectionToUse.Healthy = false
-		log.Println("askForFilePiece()", err)
 		return nil, err
 	}
-
 	//hash of the whole piece gotten
 	wholePieceSha1Hash := GetSha1Hash(data)
 	if reflect.DeepEqual(fileHash, wholePieceSha1Hash) {
@@ -308,13 +288,12 @@ func (this *TorrentFileToBuild) askForFilePiece(fileIndex int, fileHash []byte, 
 			return data[5:], nil
 		}
 	}
-
 	return nil, createError("askForFilePiece()", fmt.Sprint("THE HASH DIDN'T MATCH, FILE: ", fileIndex, " LENGTH GOTTEN: ", len(data)))
 }
 func (this *TorrentFileToBuild) writeFileToDisk(directory string) error {
 
 	err := os.WriteFile(fmt.Sprint(directory, this.Name), this.WholeFile, 0644)
-	fmt.Println("NAME: ", this.Name)
+	//fmt.Println("NAME: ", this.Name)
 	if err != nil {
 		log.Println(err)
 		return err
@@ -324,18 +303,14 @@ func (this *TorrentFileToBuild) writeFileToDisk(directory string) error {
 
 // this one needs the whole path to write the file, including the file name
 func (this *TorrentFileToBuild) writePieceOfFileToDisk(fullDirectory string, from int, end int) error {
-
-	//ensue the path exists, if not create it
-
+	//ensure the path exists, if not create it
 	toArr := strings.Split(fullDirectory, "/")
-	fmt.Println("toarr:::", toArr)
+	//get the path where the file will be saved
 	pathWithoutTheFileName := strings.Join(toArr[:len(toArr)-1], "/")
-
 	if _, err := os.Stat(pathWithoutTheFileName); os.IsNotExist(err) {
 		err = os.MkdirAll(pathWithoutTheFileName, 0700)
-		fmt.Println("Created the directory: ", pathWithoutTheFileName)
+		//fmt.Println("Created the directory: ", pathWithoutTheFileName)
 	}
-
 	err := os.WriteFile(fmt.Sprint(fullDirectory), this.WholeFile[from:end], 0644)
 	if err != nil {
 		log.Println(err)

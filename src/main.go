@@ -63,44 +63,40 @@ func main() {
 	}
 	printWithColor(Yellow, fmt.Sprint("HASH: ", hash))
 
-	//handle single file download
-	if torrentInfo.Info.Length > 0 {
+	torrentIsSingleFile := torrentInfo.Info.Length > 0
+
+	if torrentIsSingleFile {
 		//torrent that will be constructed
 		TorrentFileToBuild := TorrentFileToBuild{}
-		TorrentFileToBuild.loadInfoHash(hash)
-		TorrentFileToBuild.loadName(torrentInfo.Info.Name)
+		TorrentFileToBuild.LoadInfoHash(hash)
+		TorrentFileToBuild.LoadName(torrentInfo.Info.Name)
 		TorrentFileToBuild.LoadPieceHashes(&torrentInfo)
-		TorrentFileToBuild.loadTrackers(&torrentInfo)
+		TorrentFileToBuild.LoadTrackers(&torrentInfo)
 		TorrentFileToBuild.CalculateTotalPiecesAndBlockLength(&torrentInfo)
 		TorrentFileToBuild.GetPeers()
+		TorrentFileToBuild.pollGetPeersEveryCoupleMinutes()
 		TorrentFileToBuild.downloadFileAsync()
 		TorrentFileToBuild.writeFileToDisk("../output/")
 	} else {
 		//handle multiple file download
 		totalSizeOfFile := getTotalSizeOfMulitpleFilesTorrent(&torrentInfo)
-
 		//torrent that will be constructed
 		TorrentFileToBuild := TorrentFileToBuild{}
-		TorrentFileToBuild.loadInfoHash(hash)
-		TorrentFileToBuild.loadName("defaultfornow.jpg")
+		TorrentFileToBuild.LoadInfoHash(hash)
 		TorrentFileToBuild.LoadPieceHashes(&torrentInfo)
-		TorrentFileToBuild.loadTrackers(&torrentInfo)
-		TorrentFileToBuild.FileLength = totalSizeOfFile
-		TorrentFileToBuild.PieceSize = torrentInfo.Info.PieceLength
-		TorrentFileToBuild.TotalPieces = TorrentFileToBuild.FileLength / TorrentFileToBuild.PieceSize
-		TorrentFileToBuild.BlockLength = 16384
-		TorrentFileToBuild.AmountOfBlocks = TorrentFileToBuild.PieceSize / TorrentFileToBuild.BlockLength //Calculate the amount of blocks per piece
+		TorrentFileToBuild.LoadTrackers(&torrentInfo)
+		TorrentFileToBuild.LoadMetaData(totalSizeOfFile, torrentInfo.Info.PieceLength)
 		TorrentFileToBuild.GetPeers()
+		TorrentFileToBuild.pollGetPeersEveryCoupleMinutes()
 		TorrentFileToBuild.downloadFileAsync()
 
 		//write each file to the disk
 		start := 0
 		for _, v := range torrentInfo.Info.Files {
-			//allData := []byte{}
 			end := start + v.Length
 			currentFilePath := strings.Join(v.Path, "/")
 			TorrentFileToBuild.writePieceOfFileToDisk(fmt.Sprint("../output/", currentFilePath), start, end)
-			start += v.Length
+			start = end
 		}
 	}
 }
@@ -115,6 +111,7 @@ func getHexHash(torrentPath string) (string, error) {
 	return hexHash, nil
 }
 
+// returns the total length of all the files combined
 func getTotalSizeOfMulitpleFilesTorrent(torrentInfo *TorrentFileInfo) int {
 	totalFileSize := 0
 	for _, v := range torrentInfo.Info.Files {

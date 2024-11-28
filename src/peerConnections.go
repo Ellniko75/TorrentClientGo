@@ -30,10 +30,10 @@ func connectToPeerAndRequestWholePiece(conn *Connection, fileIndex int, torrentI
 		blockOffset := BlockLength * i
 
 		//send the request for the data
-		data, _ := requestBlock(conn.Conn, fileIndex, blockOffset, BlockLength)
-		//if err != nil {
-		//	return nil, err
-		//}
+		data, err := requestBlock(conn.Conn, fileIndex, blockOffset, BlockLength)
+		if err != nil {
+			return nil, err
+		}
 		//time.Sleep(1 * time.Second)
 		if len(data) > 0 {
 			wholePiece = append(wholePiece, data...)

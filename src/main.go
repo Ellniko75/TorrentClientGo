@@ -1,12 +1,12 @@
 package main
 
 import (
-	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"strings"
+	"torrent/pythonScripts"
 
 	"github.com/jackpal/bencode-go"
 )
@@ -37,10 +37,9 @@ type TorrentFileInfo struct {
 }
 
 func main() {
-	ResetOksAndErrors()
-	torrentUrl := "../torrents/xoka.torrent"
+	torrentPath := "../torrents/torrentCustom.torrent"
 
-	file, err := os.Open(torrentUrl)
+	file, err := os.Open(torrentPath)
 	defer file.Close()
 	if err != nil {
 		log.Println("error on reading file")
@@ -52,21 +51,14 @@ func main() {
 	if err != nil {
 		log.Println("Error on unmarshaling")
 	}
-	//don't try to do all TorrentFileToBuild on a single function, it destroys itself lmao
-	hexHash, err := getHexHash(torrentUrl)
-	if err != nil {
-		log.Println(err)
-	}
-	hash, err := hex.DecodeString(hexHash)
-	if err != nil {
-		log.Println(err)
-	}
-	printWithColor(Yellow, fmt.Sprint("HASH: ", hash))
 
+	hash, err := pythonScripts.GetInfoHash(torrentPath)
+	printWithColor(Blue, fmt.Sprint("HASH: ", hash))
+
+	//counter intuitive but trust me
 	torrentIsSingleFile := torrentInfo.Info.Length > 0
 
 	if torrentIsSingleFile {
-		//torrent that will be constructed
 		TorrentFileToBuild := TorrentFileToBuild{}
 		TorrentFileToBuild.LoadInfoHash(hash)
 		TorrentFileToBuild.LoadName(torrentInfo.Info.Name)
@@ -78,9 +70,7 @@ func main() {
 		TorrentFileToBuild.downloadFileAsync()
 		TorrentFileToBuild.writeFileToDisk("../output/")
 	} else {
-		//handle multiple file download
 		totalSizeOfFile := getTotalSizeOfMulitpleFilesTorrent(&torrentInfo)
-		//torrent that will be constructed
 		TorrentFileToBuild := TorrentFileToBuild{}
 		TorrentFileToBuild.LoadInfoHash(hash)
 		TorrentFileToBuild.LoadPieceHashes(&torrentInfo)
@@ -102,9 +92,10 @@ func main() {
 }
 
 func getHexHash(torrentPath string) (string, error) {
-	cmd := exec.Command("python", "../PythonScripts/CalculateHash.py", torrentPath)
+	cmd := exec.Command("python", "./CalculateHash.py", torrentPath)
 	output, err := cmd.Output()
 	if err != nil {
+		log.Println(err)
 		return "", err
 	}
 	hexHash := string(output)

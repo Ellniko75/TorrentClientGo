@@ -27,8 +27,8 @@ type TorrentFileToBuild struct {
 	ListOfHashes   []Hash   //hashes for each piece of the file
 	InfoHash       []byte
 	FileLength     int
-	File           [10000000][]byte //property to write the file when the pieces arrive
 	WholeFile      []byte
+	File           [10000][]byte //property to write the file when the pieces arrive
 }
 
 type Hash struct {
@@ -212,8 +212,9 @@ func (this *TorrentFileToBuild) allFilesAreDownloaded() bool {
 
 // Blocks form a Piece, and Pieces form the file
 func (this *TorrentFileToBuild) downloadFileAsync() {
-	var w sync.WaitGroup
+
 	for {
+		var w sync.WaitGroup
 		//loop all the pieces and request them
 		for fileIndex, v := range this.ListOfHashes {
 			if v.Completed {
@@ -244,9 +245,9 @@ func (this *TorrentFileToBuild) downloadFileAsync() {
 		if this.allFilesAreDownloaded() {
 			break
 		}
+		w.Wait()
 	}
 
-	w.Wait()
 	//get the pieces of all the file and store it in WholePiece
 	data := this.File[:this.TotalPieces+1]
 	for _, v := range data {

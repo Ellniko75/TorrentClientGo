@@ -73,6 +73,9 @@ func (this *TorrentFileToBuild) CalculateTotalPiecesAndBlockLength(info *Torrent
 	printWithColor(Red, fmt.Sprint("Total pieces: ", this.TotalPieces+1)) //need to add +1 since its an index that starts counting form 0
 	printWithColor(Red, fmt.Sprint("Block size: ", this.BlockLength))
 	printWithColor(Red, fmt.Sprint("Amount of blocks: ", this.AmountOfBlocks))
+
+	writePartialFile(partialFileInit(this.FileLength))
+	fmt.Println("PARTIAL FILE CREATED")
 	//if this.FileLength == 0 {
 	//	log.Panic("ERROR ON READING THE FILE LENGTH, FOR NOW THIS ONLY SUPPORTS SINGLE FILE DOWNLOADING")
 	//}
@@ -352,4 +355,28 @@ func randomString(n int) string {
 		s[i] = letters[time.Now().UnixNano()%int64(len(letters))]
 	}
 	return string(s)
+}
+
+func partialFileInit(totalSize int) []byte {
+	printWithColor(Green, "CREATING PARTIAL FILE...")
+	arr := []byte{}
+	for i := 0; i < totalSize; i++ {
+		arr = append(arr, 0)
+	}
+
+	return arr
+}
+func writePartialFile(data []byte) error {
+	err := os.WriteFile("partial.bin", data, 0644)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+func getPartialFile() ([]byte, error) {
+	data, err := os.ReadFile("partial.bin")
+	if err != nil {
+		return nil, err
+	}
+	return data, err
 }

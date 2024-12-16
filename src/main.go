@@ -37,7 +37,7 @@ type TorrentFileInfo struct {
 }
 
 func main() {
-	torrentPath := "../torrents/torrentCustom.torrent"
+	torrentPath := "../torrents/xoka.torrent"
 
 	file, err := os.Open(torrentPath)
 	defer file.Close()

@@ -27,8 +27,6 @@ type TorrentFileToBuild struct {
 	ListOfHashes   []Hash   //hashes for each piece of the file
 	InfoHash       []byte
 	FileLength     int
-	WholeFile      []byte
-	File           [10000][]byte //property to write the file when the pieces arrive
 }
 
 type Hash struct {
@@ -74,11 +72,6 @@ func (this *TorrentFileToBuild) CalculateTotalPiecesAndBlockLength(info *Torrent
 	printWithColor(Red, fmt.Sprint("Block size: ", this.BlockLength))
 	printWithColor(Red, fmt.Sprint("Amount of blocks: ", this.AmountOfBlocks))
 
-	writePartialFile(partialFileInit(this.FileLength))
-	fmt.Println("PARTIAL FILE CREATED")
-	//if this.FileLength == 0 {
-	//	log.Panic("ERROR ON READING THE FILE LENGTH, FOR NOW THIS ONLY SUPPORTS SINGLE FILE DOWNLOADING")
-	//}
 }
 
 // this is the same as CalculateTotalPiecesAndBlockLength but it receives the information separated instead of as a TorrentFileInfo pointer
@@ -173,13 +166,9 @@ func (this *TorrentFileToBuild) pollGetPeersEveryCoupleMinutes() {
 			if this.allFilesAreDownloaded() {
 				return
 			}
-
 			this.GetPeers()
-
 			time.Sleep(10 * time.Second)
-
 		}
-
 	}()
 }
 
@@ -215,7 +204,6 @@ func (this *TorrentFileToBuild) allFilesAreDownloaded() bool {
 
 // Blocks form a Piece, and Pieces form the file
 func (this *TorrentFileToBuild) downloadFileAsync() {
-
 	for {
 		var w sync.WaitGroup
 		//loop all the pieces and request them
@@ -235,26 +223,23 @@ func (this *TorrentFileToBuild) downloadFileAsync() {
 				data, err := this.askForFilePiece(fileIndex, v.Hash, connectionToUse, final)
 				if err != nil {
 					printWithColor(Red, err.Error())
-					WriteToErrorstxt(fileIndex)
+					//WriteToErrorstxt(fileIndex)
 					return
 				}
 				//Show completed message
 				printWithColor(Green, fmt.Sprint(" Hash match on file ", fileIndex))
 				//set completed to true - need to do it like this, because v is a copy of the value and not a reference
 				this.ListOfHashes[fileIndex].Completed = true
-				this.File[fileIndex] = data
+
+				//Write to the temp file the downloaded piece
+				indexStart := this.PieceSize * fileIndex
+				this.writeToTempFile(data, indexStart)
 			}()
 		}
 		if this.allFilesAreDownloaded() {
 			break
 		}
 		w.Wait()
-	}
-
-	//get the pieces of all the file and store it in WholePiece
-	data := this.File[:this.TotalPieces+1]
-	for _, v := range data {
-		this.WholeFile = append(this.WholeFile, v...)
 	}
 }
 
@@ -284,14 +269,14 @@ func (this *TorrentFileToBuild) askForFilePiece(fileIndex int, fileHash []byte, 
 	//hash of the whole piece gotten
 	wholePieceSha1Hash := GetSha1Hash(data)
 	if reflect.DeepEqual(fileHash, wholePieceSha1Hash) {
-		WriteToOkstxt(fileIndex)
+		//WriteToOkstxt(fileIndex)
 		return data, nil
 	}
 	if len(data) > 5 {
 		//hash of the whole piece except the first 5 bytes (sometimes this can help)
 		alternativeHash := GetSha1Hash(data[5:])
 		if reflect.DeepEqual(fileHash, alternativeHash) {
-			WriteToOkstxt(fileIndex)
+			//WriteToOkstxt(fileIndex)
 			return data[5:], nil
 		}
 	}
@@ -299,7 +284,11 @@ func (this *TorrentFileToBuild) askForFilePiece(fileIndex int, fileHash []byte, 
 }
 func (this *TorrentFileToBuild) writeFileToDisk(directory string) error {
 
-	err := os.WriteFile(fmt.Sprint(directory, this.Name), this.WholeFile, 0644)
+	data, err := this.getTempFile()
+	if err != nil {
+		return err
+	}
+	err = os.WriteFile(fmt.Sprint(directory, this.Name), data, 0644)
 	//fmt.Println("NAME: ", this.Name)
 	if err != nil {
 		log.Println(err)
@@ -318,7 +307,13 @@ func (this *TorrentFileToBuild) writePieceOfFileToDisk(fullDirectory string, fro
 		err = os.MkdirAll(pathWithoutTheFileName, 0700)
 		//fmt.Println("Created the directory: ", pathWithoutTheFileName)
 	}
-	err := os.WriteFile(fmt.Sprint(fullDirectory), this.WholeFile[from:end], 0644)
+	//get the partial file from the disk
+	file, err := this.getTempFile()
+	if err != nil {
+		return err
+	}
+
+	err = os.WriteFile(fmt.Sprint(fullDirectory), file[from:end], 0644)
 	if err != nil {
 		log.Println(err)
 		return err
@@ -357,26 +352,55 @@ func randomString(n int) string {
 	return string(s)
 }
 
-func partialFileInit(totalSize int) []byte {
-	printWithColor(Green, "CREATING PARTIAL FILE...")
+func (this *TorrentFileToBuild) tempFileInit() []byte {
 	arr := []byte{}
-	for i := 0; i < totalSize; i++ {
+	for i := 0; i < this.FileLength; i++ {
 		arr = append(arr, 0)
 	}
 
 	return arr
 }
-func writePartialFile(data []byte) error {
-	err := os.WriteFile("partial.bin", data, 0644)
+
+func (this *TorrentFileToBuild) writeTempFile(data []byte) error {
+	err := os.WriteFile("./partial.bin", data, 0644)
 	if err != nil {
 		return err
 	}
 	return nil
 }
-func getPartialFile() ([]byte, error) {
+
+// get a byte array and write it to the specified indices
+func (this *TorrentFileToBuild) writeToTempFile(dataToWrite []byte, start int) {
+
+	file, err := os.OpenFile("partial.bin", os.O_RDWR, 0644)
+	defer file.Close()
+
+	if err != nil {
+		log.Println("ERROR ON WRITEPARTIALFILESTARTEND")
+	}
+	//move to the place where you want to write the data
+	_, err = file.Seek(int64(start), 0)
+	if err != nil {
+		log.Println("error seeking the partial file ", err)
+	}
+	//write the data
+	_, err = file.Write(dataToWrite)
+	if err != nil {
+		log.Println("error on writing partial file ", err)
+	}
+	printWithColor(Blue, "Written to partial successfully")
+
+}
+func (this *TorrentFileToBuild) getTempFile() ([]byte, error) {
 	data, err := os.ReadFile("partial.bin")
 	if err != nil {
 		return nil, err
 	}
 	return data, err
+}
+func (this *TorrentFileToBuild) deleteTempFile() {
+	err := os.Remove("partial.bin")
+	if err != nil {
+		log.Println(err)
+	}
 }

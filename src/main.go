@@ -55,9 +55,7 @@ func main() {
 	hash, err := pythonScripts.GetInfoHash(torrentPath)
 	printWithColor(Blue, fmt.Sprint("HASH: ", hash))
 
-	//counter intuitive but trust me
 	torrentIsSingleFile := torrentInfo.Info.Length > 0
-
 	if torrentIsSingleFile {
 		TorrentFileToBuild := TorrentFileToBuild{}
 		TorrentFileToBuild.LoadInfoHash(hash)
@@ -65,10 +63,12 @@ func main() {
 		TorrentFileToBuild.LoadPieceHashes(&torrentInfo)
 		TorrentFileToBuild.LoadTrackers(&torrentInfo)
 		TorrentFileToBuild.CalculateTotalPiecesAndBlockLength(&torrentInfo)
+		TorrentFileToBuild.writeTempFile(TorrentFileToBuild.tempFileInit())
 		TorrentFileToBuild.GetPeers()
 		TorrentFileToBuild.pollGetPeersEveryCoupleMinutes()
 		TorrentFileToBuild.downloadFileAsync()
 		TorrentFileToBuild.writeFileToDisk("../output/")
+		TorrentFileToBuild.deleteTempFile()
 	} else {
 		totalSizeOfFile := getTotalSizeOfMulitpleFilesTorrent(&torrentInfo)
 		TorrentFileToBuild := TorrentFileToBuild{}
@@ -76,10 +76,10 @@ func main() {
 		TorrentFileToBuild.LoadPieceHashes(&torrentInfo)
 		TorrentFileToBuild.LoadTrackers(&torrentInfo)
 		TorrentFileToBuild.LoadMetaData(totalSizeOfFile, torrentInfo.Info.PieceLength)
+		TorrentFileToBuild.writeTempFile(TorrentFileToBuild.tempFileInit())
 		TorrentFileToBuild.GetPeers()
 		TorrentFileToBuild.pollGetPeersEveryCoupleMinutes()
 		TorrentFileToBuild.downloadFileAsync()
-
 		//write each file to the disk
 		start := 0
 		for _, v := range torrentInfo.Info.Files {
@@ -88,6 +88,7 @@ func main() {
 			TorrentFileToBuild.writePieceOfFileToDisk(fmt.Sprint("../output/", currentFilePath), start, end)
 			start = end
 		}
+		TorrentFileToBuild.deleteTempFile()
 	}
 }
 

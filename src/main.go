@@ -37,6 +37,7 @@ type TorrentFileInfo struct {
 }
 
 func main() {
+
 	torrentPath := "../torrents/xoka.torrent"
 
 	file, err := os.Open(torrentPath)
@@ -67,7 +68,7 @@ func main() {
 		TorrentFileToBuild.GetPeers()
 		TorrentFileToBuild.pollGetPeersEveryCoupleMinutes()
 		TorrentFileToBuild.downloadFileAsync()
-		TorrentFileToBuild.writeFileToDisk("../output/")
+		TorrentFileToBuild.writeFileInPieces("../output/", TorrentFileToBuild.Name, 0, TorrentFileToBuild.FileLength)
 		TorrentFileToBuild.deleteTempFile()
 	} else {
 		totalSizeOfFile := getTotalSizeOfMulitpleFilesTorrent(&torrentInfo)
@@ -90,6 +91,7 @@ func main() {
 		}
 		TorrentFileToBuild.deleteTempFile()
 	}
+
 }
 
 func getHexHash(torrentPath string) (string, error) {

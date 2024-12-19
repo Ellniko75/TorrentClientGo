@@ -282,43 +282,89 @@ func (this *TorrentFileToBuild) askForFilePiece(fileIndex int, fileHash []byte, 
 	}
 	return nil, createError("askForFilePiece()", fmt.Sprint("THE HASH DIDN'T MATCH, FILE: ", fileIndex, " LENGTH GOTTEN: ", len(data)))
 }
-func (this *TorrentFileToBuild) writeFileToDisk(directory string) error {
 
-	data, err := this.getTempFile()
-	if err != nil {
-		return err
+/*
+	func (this *TorrentFileToBuild) writeFileToDisk(directory string) error {
+		data, err := this.getTempFile()
+		if err != nil {
+			return err
+		}
+		err = os.WriteFile(fmt.Sprint(directory, this.Name), data, 0644)
+		if err != nil {
+			log.Println(err)
+			return err
+		}
+		return nil
 	}
-	err = os.WriteFile(fmt.Sprint(directory, this.Name), data, 0644)
-	//fmt.Println("NAME: ", this.Name)
+*/
+//gets the partial.bin file that holds all the binary data, and writes it in chunks to the desired path and with the desired name
+func (this *TorrentFileToBuild) writeFileInPieces(directory string, name string, pStart int, pEnd int) {
+	//open the file we read from
+	fileRead, err := os.Open("partial.bin")
 	if err != nil {
 		log.Println(err)
-		return err
 	}
-	return nil
+	defer fileRead.Close()
+	//create the file we are going to write to
+	fileWriteTo, err := os.Create(fmt.Sprint(directory, name))
+	if err != nil {
+		log.Println(err)
+	}
+	defer fileWriteTo.Close()
+
+	startIndexWrite := 0
+	startIndexRead := pStart
+	chunkWriteReadLength := 10000000
+	leftToWrite := pEnd - pStart
+	for {
+		//if we don't have any more to write-read, we break
+		if leftToWrite <= 0 {
+			break
+		}
+		//if the chunk we are going to read surpasses the "left we have to read", we set it to what we have left
+		if chunkWriteReadLength > leftToWrite {
+			chunkWriteReadLength = leftToWrite
+		}
+		//holds in ram the data
+		toWrite := make([]byte, chunkWriteReadLength)
+		//read the data from the start
+		fileRead.Seek(int64(startIndexRead), 0)
+		_, err = fileRead.Read(toWrite)
+		if err != nil {
+			log.Println(err)
+		}
+		//write it from the start
+		_, err = fileWriteTo.Seek(int64(startIndexWrite), 0)
+		if err != nil {
+			log.Println("error at seeking")
+		}
+		_, err = fileWriteTo.Write(toWrite)
+		if err != nil {
+			log.Println(err)
+		}
+		//set the new index for reading
+		startIndexRead += chunkWriteReadLength
+		//set the new index for writing
+		startIndexWrite += chunkWriteReadLength
+		//now we have less leftToWrite
+		leftToWrite -= chunkWriteReadLength
+	}
 }
 
-// this one needs the whole path to write the file, including the file name
-func (this *TorrentFileToBuild) writePieceOfFileToDisk(fullDirectory string, from int, end int) error {
+// calls writeFileInPieces, and just does some extra things before
+func (this *TorrentFileToBuild) writePieceOfFileToDisk(fullDirectory string, start int, end int) error {
 	//ensure the path exists, if not create it
 	toArr := strings.Split(fullDirectory, "/")
 	//get the path where the file will be saved
-	pathWithoutTheFileName := strings.Join(toArr[:len(toArr)-1], "/")
-	if _, err := os.Stat(pathWithoutTheFileName); os.IsNotExist(err) {
-		err = os.MkdirAll(pathWithoutTheFileName, 0700)
-		//fmt.Println("Created the directory: ", pathWithoutTheFileName)
+	path := strings.Join(toArr[:len(toArr)-1], "/")
+	//create the directory if it does not exist
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		err = os.MkdirAll(path, 0700)
 	}
-	//get the partial file from the disk
-	file, err := this.getTempFile()
-	if err != nil {
-		return err
-	}
-
-	err = os.WriteFile(fmt.Sprint(fullDirectory), file[from:end], 0644)
-	if err != nil {
-		log.Println(err)
-		return err
-	}
+	name := strings.Join(toArr[len(toArr)-1:], "")
+	this.writeFileInPieces(fmt.Sprint(path, "/"), name, start, end)
 	return nil
+
 }
 
 func generatePeerID() ([20]byte, error) {
@@ -353,12 +399,9 @@ func randomString(n int) string {
 }
 
 func (this *TorrentFileToBuild) tempFileInit() []byte {
-	arr := []byte{}
-	for i := 0; i < this.FileLength; i++ {
-		arr = append(arr, 0)
-	}
+	partialfileRead := make([]byte, this.FileLength)
 
-	return arr
+	return partialfileRead
 }
 
 func (this *TorrentFileToBuild) writeTempFile(data []byte) error {
@@ -397,6 +440,19 @@ func (this *TorrentFileToBuild) getTempFile() ([]byte, error) {
 		return nil, err
 	}
 	return data, err
+}
+func (this *TorrentFileToBuild) getTempFileStartAndEnd(start int64, end int64) ([]byte, error) {
+	file, err := os.Open("partial.bin")
+	defer file.Close()
+	if err != nil {
+		return nil, err
+	}
+	readArrLength := end - start
+	dataArr := make([]byte, readArrLength)
+	file.Seek(start, 0)
+	file.Read(dataArr)
+
+	return dataArr, nil
 }
 func (this *TorrentFileToBuild) deleteTempFile() {
 	err := os.Remove("partial.bin")

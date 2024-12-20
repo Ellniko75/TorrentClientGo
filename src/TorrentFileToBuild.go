@@ -7,11 +7,15 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jackpal/bencode-go"
 )
 
 // contains all the info and functions necessary to download the file
@@ -43,6 +47,10 @@ type Connection struct {
 	Using   bool //currently using
 	Healthy bool //if the connection has not responded we mark its healthy as false
 	mu      sync.Mutex
+}
+type BencodedResponseHTTPTracker struct {
+	Interval int    `bencode:"interval"`
+	Peers    string `bencode:"peers"`
 }
 
 func (this *TorrentFileToBuild) LoadPieceHashes(torrentInfo *TorrentFileInfo) {
@@ -99,66 +107,114 @@ func (this *TorrentFileToBuild) LoadTrackers(torrentInfo *TorrentFileInfo) {
 
 // Loop all the torrent trackers and get the peers that have the file
 func (this *TorrentFileToBuild) GetPeers() {
+	var mainWaitGroup sync.WaitGroup
 	for _, tracker := range this.ListOfTrackers {
-		if tracker[:3] == "udp" {
-			//Adjust the format of the UDP tracker URL
-			trackerURL := strings.TrimPrefix(tracker, "udp://") //you need to strip the udp:// from the tracker to resolve the address later
-			trackerURL = strings.TrimSuffix(trackerURL, "/announce")
+		go func() {
+			mainWaitGroup.Add(1)
+			defer mainWaitGroup.Done()
+			if tracker[:3] == "udp" {
+				//Adjust the format of the UDP tracker URL
+				trackerURL := strings.TrimPrefix(tracker, "udp://") //you need to strip the udp:// from the tracker to resolve the address later
+				trackerURL = strings.TrimSuffix(trackerURL, "/announce")
+				//create udp connection for the UDP tracker
+				conn, err := createUdpConnection(trackerURL)
+				defer conn.Close()
+				if err != nil {
+					printWithColor(Red, err.Error())
+					return
+				}
+				//Create random transaction ID
+				transactionID := int32(rand.Int31())
 
-			//create udp connection for the UDP tracker
-			conn, err := createUdpConnection(trackerURL)
-			defer conn.Close()
-			if err != nil {
-				printWithColor(Red, err.Error())
-				continue
+				//Request to UDP TRACKER and read the response
+				transactionIDResponse, connectionIDResponse, err := initiateUdpConnection(conn, transactionID)
+				if err != nil {
+					printWithColor(Red, err.Error())
+					return
+				}
+
+				//GENERATE A RANDOM ID FOR THE REQUEST
+				peerID, _ := generatePeerID()
+
+				//GET ALL THE PEERS THAT HAVE THE FILE FROM THE TRACKERS
+				trackerAnnounceResponse, _, err := getPeersFromUdp(
+					conn,
+					this.InfoHash,
+					connectionIDResponse,
+					transactionIDResponse,
+					peerID)
+				if err != nil {
+					printWithColor(Red, err.Error())
+					return
+				}
+
+				//parse the tracker response
+				TrackerResponseParsed := TrackerResponse{}
+				TrackerResponseParsed.Create(trackerAnnounceResponse)
+				//TrackerResponseParsed.Print()
+				ipsAndPorts := TrackerResponseParsed.getIpAndPorts()
+				//we only add the ips and ports if they actually are responsive
+				//create all the connections and add them to the slice
+				var w sync.WaitGroup
+				for _, v := range ipsAndPorts {
+					go func() {
+						w.Add(1)
+						defer w.Done()
+						this.AddConnection(v, peerID)
+					}()
+				}
+				w.Wait()
+			} else {
+				infoHash := url.QueryEscape(string(this.InfoHash))
+				peerId, _ := generatePeerID()
+				peerIdArrByte := []byte(peerId[:])
+				port := 6881
+				downloaded := 0
+				left := 0
+
+				url := tracker
+				url += fmt.Sprint("?info_hash=", infoHash)
+				url += fmt.Sprint("&peer_id=", string(peerIdArrByte))
+				url += fmt.Sprint("&ip=", "255.255.255.255")
+				url += fmt.Sprint("&port=", port)
+				url += fmt.Sprint("&downloaded=", downloaded)
+				url += fmt.Sprint("&left=", left)
+				url += fmt.Sprint("&event=", "started")
+
+				httpClient := http.Client{
+					Timeout: 5 * time.Second,
+				}
+				resp, err := httpClient.Get(url)
+				if err != nil {
+					log.Println(err)
+					return
+				}
+				printWithColor(Yellow, "HTTP tracker response got")
+				BencodedResponse := BencodedResponseHTTPTracker{}
+				err = bencode.Unmarshal(resp.Body, &BencodedResponse)
+				if err != nil {
+					log.Println("Error unmarshaling the http response into bencoded data")
+					return
+				}
+				for i := 0; i < len(BencodedResponse.Peers); i += 6 {
+					var w sync.WaitGroup
+					go func() {
+						w.Add(1)
+						defer w.Done()
+						peersStr := BencodedResponse.Peers
+						ip := fmt.Sprint(peersStr[i], ".", peersStr[i+1], ".", peersStr[i+2], ".", peersStr[i+3])
+						port := string(peersStr[i+4]) + string(peersStr[i+5])
+						portNumber := binary.BigEndian.Uint16([]byte(port))
+						fullIp := fmt.Sprint(ip, ":", portNumber)
+						this.AddConnection(fullIp, peerId)
+					}()
+					w.Wait()
+				}
 			}
-
-			//Create random transaction ID
-			transactionID := int32(rand.Int31())
-
-			//Request to UDP TRACKER and read the response
-			transactionIDResponse, connectionIDResponse, err := initiateUdpConnection(conn, transactionID)
-			if err != nil {
-				printWithColor(Red, err.Error())
-				continue
-			}
-
-			//GENERATE A RANDOM ID FOR THE REQUEST
-			peerID, _ := generatePeerID()
-
-			//GET ALL THE PEERS THAT HAVE THE FILE FROM THE TRACKERS
-			trackerAnnounceResponse, _, err := getPeersFromUdp(
-				conn,
-				this.InfoHash,
-				connectionIDResponse,
-				transactionIDResponse,
-				peerID)
-			if err != nil {
-				printWithColor(Red, err.Error())
-				continue
-			}
-
-			//parse the tracker response
-			TrackerResponseParsed := TrackerResponse{}
-			TrackerResponseParsed.Create(trackerAnnounceResponse)
-			TrackerResponseParsed.Print()
-			ipsAndPorts := TrackerResponseParsed.getIpAndPorts()
-			printWithColor(Green, "ADDING NEW PEERS...")
-			//we only add the ips and ports if they actually are responsive
-			//create all the connections and add them to the slice
-			var w sync.WaitGroup
-			this.Connections.mu.Lock()
-			for _, v := range ipsAndPorts {
-				go func() {
-					w.Add(1)
-					defer w.Done()
-					this.AddConnection(v, peerID)
-				}()
-			}
-			w.Wait()
-			this.Connections.mu.Unlock()
-		}
+		}()
+		mainWaitGroup.Wait()
 	}
+	printWithColor(Red, "FINISHED GET PEERS")
 }
 func (this *TorrentFileToBuild) pollGetPeersEveryCoupleMinutes() {
 	go func() {
@@ -167,7 +223,7 @@ func (this *TorrentFileToBuild) pollGetPeersEveryCoupleMinutes() {
 				return
 			}
 			this.GetPeers()
-			time.Sleep(10 * time.Second)
+			time.Sleep(20 * time.Second)
 		}
 	}()
 }
@@ -181,6 +237,7 @@ func (this *TorrentFileToBuild) AddConnection(ipAndPort string, peerID [20]byte)
 	if err != nil {
 		return
 	}
+	printWithColor(Green, "PEER CONNECTION ADDED SUCCESSFULLY")
 	this.Connections.Conns = append(this.Connections.Conns, Connection{Conn: conn, Using: false, Ip: ipAndPort, Healthy: true})
 }
 func (this *TorrentFileToBuild) isIpRepeatedAndHealthy(ip string) bool {
@@ -283,21 +340,7 @@ func (this *TorrentFileToBuild) askForFilePiece(fileIndex int, fileHash []byte, 
 	return nil, createError("askForFilePiece()", fmt.Sprint("THE HASH DIDN'T MATCH, FILE: ", fileIndex, " LENGTH GOTTEN: ", len(data)))
 }
 
-/*
-	func (this *TorrentFileToBuild) writeFileToDisk(directory string) error {
-		data, err := this.getTempFile()
-		if err != nil {
-			return err
-		}
-		err = os.WriteFile(fmt.Sprint(directory, this.Name), data, 0644)
-		if err != nil {
-			log.Println(err)
-			return err
-		}
-		return nil
-	}
-*/
-//gets the partial.bin file that holds all the binary data, and writes it in chunks to the desired path and with the desired name
+// gets the partial.bin file that holds all the binary data, and writes it in chunks to the desired path and with the desired name
 func (this *TorrentFileToBuild) writeFileInPieces(directory string, name string, pStart int, pEnd int) {
 	//open the file we read from
 	fileRead, err := os.Open("partial.bin")
@@ -368,7 +411,6 @@ func (this *TorrentFileToBuild) writePieceOfFileToDisk(fullDirectory string, sta
 }
 
 func generatePeerID() ([20]byte, error) {
-
 	var peerId bytes.Buffer
 
 	firstPart := []byte("-Go1234-")

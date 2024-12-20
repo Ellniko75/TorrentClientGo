@@ -12,14 +12,12 @@ import (
 
 // Creates udp connection with a timeout of 2 seconds
 func createUdpConnection(url string) (*net.UDPConn, error) {
-
 	// Resolve UDP address
 	addr, err := net.ResolveUDPAddr("udp", url)
 
 	if err != nil {
 		return nil, err
 	}
-
 	// Create UDP connection
 	conn, err := net.DialUDP("udp", nil, addr)
 
@@ -52,8 +50,6 @@ func initiateUdpConnection(conn *net.UDPConn, transactionID int32) (uint32, uint
 	if err != nil {
 		return 0, 0, createError(currentFunctionName, err.Error())
 	}
-
-	fmt.Println("Connect request sent.")
 
 	//Read Response
 	response := make([]byte, 16)

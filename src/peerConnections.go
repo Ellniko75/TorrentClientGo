@@ -96,15 +96,13 @@ func handleHandshake(infoHash []byte, peerID [20]byte, conn net.Conn) ([]byte, e
 		return nil, createError("handleHandshake()", err.Error())
 	}
 
-	n, err := conn.Write(handshakeMessage.Bytes())
+	_, err := conn.Write(handshakeMessage.Bytes())
 	if err != nil {
 		return nil, createError("handleHandshake()", err.Error())
-	} else {
-		printWithColor(Yellow, fmt.Sprint(" Hanshake Bytes sent:", n))
 	}
 
 	data := make([]byte, 2048)
-	n, err = conn.Read(data)
+	_, err = conn.Read(data)
 	if err != nil {
 		return nil, createError("handleHandshake()", err.Error())
 	}

@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"net"
 	"time"
 )
@@ -28,8 +27,8 @@ func connectToPeerAndRequestWholePiece(conn *Connection, fileIndex int, torrentI
 	wholePiece := []byte{}
 	for i := 0; i < AmountOfBlocks; i++ {
 		blockOffset := BlockLength * i
-
 		//send the request for the data
+
 		data, err := requestBlock(conn.Conn, fileIndex, blockOffset, BlockLength)
 		if err != nil {
 			return nil, err
@@ -49,6 +48,7 @@ func initiatePeerConnection(ip string, infoHash []byte, peerId [20]byte) (net.Co
 	if err != nil {
 		return nil, err
 	}
+
 	_, err = handleHandshake(infoHash, peerId, connection)
 	if err != nil {
 		return nil, err
@@ -61,7 +61,7 @@ func initiatePeerConnection(ip string, infoHash []byte, peerId [20]byte) (net.Co
 func createTcpConnection(ip string) (net.Conn, error) {
 	// Connect to the server
 	//printWithColor(Yellow, fmt.Sprint(" Attempting to Connect: ", ip))
-	conn, err := net.DialTimeout("tcp", ip, 2*time.Second)
+	conn, err := net.DialTimeout("tcp", ip, 3*time.Second)
 	if err != nil {
 		return nil, createError("createTcpConnection()", err.Error())
 	}
@@ -70,7 +70,6 @@ func createTcpConnection(ip string) (net.Conn, error) {
 }
 
 func handleHandshake(infoHash []byte, peerID [20]byte, conn net.Conn) ([]byte, error) {
-	//deserialize the pointer
 
 	//handle the handshake
 	var handshakeMessage bytes.Buffer
@@ -95,12 +94,15 @@ func handleHandshake(infoHash []byte, peerID [20]byte, conn net.Conn) ([]byte, e
 	if err := binary.Write(&handshakeMessage, binary.BigEndian, peerID); err != nil {
 		return nil, createError("handleHandshake()", err.Error())
 	}
-
+	//send the handshake message
 	_, err := conn.Write(handshakeMessage.Bytes())
 	if err != nil {
 		return nil, createError("handleHandshake()", err.Error())
 	}
-
+	//set the deadline for handhsake to 3 seconds
+	t := time.Time{}
+	t.Add(3 * time.Second)
+	conn.SetReadDeadline(t)
 	data := make([]byte, 2048)
 	_, err = conn.Read(data)
 	if err != nil {
@@ -112,9 +114,6 @@ func handleHandshake(infoHash []byte, peerID [20]byte, conn net.Conn) ([]byte, e
 
 // Requests a block of a piece, normaly a piece is formed by various blocks
 func requestBlock(conn net.Conn, fileIndex int, blockOffset int, blockLength int) ([]byte, error) {
-
-	//printWithColor(Red, fmt.Sprint("requesting index: ", fileIndex, " block offset: ", blockOffset))
-
 	//load the payload to send to the peer
 	var buff bytes.Buffer
 	//Size of the request (Message Length)
@@ -145,48 +144,25 @@ func requestBlock(conn net.Conn, fileIndex int, blockOffset int, blockLength int
 	}
 
 	//clean up the connection if there is anything there yet
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	var response = make([]byte, 1000000)
 	totalRead := 0
 	actualData := []byte{}
 	for {
-		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 		n, err = conn.Read(response)
 		totalRead += n
-
 		if n == 5 {
-			fmt.Println("this is shit data that does not serve for anything", response[:n])
+			//fmt.Println("this is shit data that does not serve for anything", response[:n])
 			continue
 		}
-
 		actualData = append(actualData, response[:n]...)
 
 		if err != nil {
 			//if there is an error but we haven't tried twice yet, we try again
 			return nil, createError("requestBlock() on conn.Write()", err.Error())
 		}
-
 		if totalRead >= blockLength {
 			return actualData[13:], nil
 		}
-
-		//length := binary.BigEndian.Uint32(block[:4])
-		//index := binary.BigEndian.Uint32(block[6:10])
-		//begin := binary.BigEndian.Uint32(block[10:14])
-
-		//sometimes the connections sends just 5 random bytes instead of the actual data, so we just keep looping if that happens
-		//if len(block[:n]) <= 10 {
-		//	printWithColor(Yellow, " THIS SHIT IS NOT the data ")
-		//}
-
 	}
-
-	//gottenFile := response[13:n]
-	//start := fileIndex * 131072
-	//expectedFile := GetExpectedFile()[start+blockOffset : start+blockOffset+blockLength]
-	//filesDoMatch := reflect.DeepEqual(gottenFile, expectedFile)
-	//printWithColor(Yellow, fmt.Sprint("Match? ", filesDoMatch))
-	//return only the data, not the metadata
-
-	//return block[13:totalRead], nil
-
 }

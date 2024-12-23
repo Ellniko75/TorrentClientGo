@@ -9,6 +9,9 @@ import (
 	"torrent/pythonScripts"
 
 	"github.com/jackpal/bencode-go"
+
+	"net/http"
+	_ "net/http/pprof"
 )
 
 var Red = "\033[31m"
@@ -37,6 +40,9 @@ type TorrentFileInfo struct {
 }
 
 func main() {
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
 
 	torrentPath := "../torrents/torrentCustom.torrent"
 
@@ -79,7 +85,7 @@ func main() {
 		TorrentFileToBuild.LoadMetaData(totalSizeOfFile, torrentInfo.Info.PieceLength)
 		TorrentFileToBuild.writeTempFile(TorrentFileToBuild.tempFileInit())
 		TorrentFileToBuild.GetPeers()
-		TorrentFileToBuild.pollGetPeersEveryCoupleMinutes()
+		//TorrentFileToBuild.pollGetPeersEveryCoupleMinutes()
 		TorrentFileToBuild.downloadFileAsync()
 		//write each file to the disk
 		start := 0

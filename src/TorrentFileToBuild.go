@@ -25,12 +25,12 @@ type TorrentFileToBuild struct {
 	TotalPieces    int
 	BlockLength    int
 	AmountOfBlocks int
-	Connections    Connections //slice of all peers that have the file
 	MainTracker    string
-	ListOfTrackers []string //list of all the trackers
-	ListOfHashes   []Hash   //hashes for each piece of the file
-	InfoHash       []byte
 	FileLength     int
+	Connections    Connections //slice of all peers that have the file
+	ListOfTrackers []string    //list of all the trackers
+	ListOfHashes   []Hash      //hashes for each piece of the file
+	InfoHash       []byte
 }
 
 type Hash struct {
@@ -39,14 +39,15 @@ type Hash struct {
 }
 type Connections struct {
 	Conns []Connection
-	mu    sync.Mutex
+	Mu    sync.Mutex
 }
 type Connection struct {
-	Conn    net.Conn
-	Ip      string
-	Using   bool //currently using
-	Healthy bool //if the connection has not responded we mark its healthy as false
-	mu      sync.Mutex
+	Conn            net.Conn
+	Ip              string
+	Using           bool //currently using
+	Healthy         bool //if the connection has not responded we mark its healthy as false
+	Speed           int  //Speed of that connection
+	UsedAtLeastOnce bool
 }
 type BencodedResponseHTTPTracker struct {
 	Interval int    `bencode:"interval"`
@@ -107,11 +108,11 @@ func (this *TorrentFileToBuild) LoadTrackers(torrentInfo *TorrentFileInfo) {
 
 // Loop all the torrent trackers and get the peers that have the file
 func (this *TorrentFileToBuild) GetPeers() {
-	var mainWaitGroup sync.WaitGroup
+	var w sync.WaitGroup
 	for _, tracker := range this.ListOfTrackers {
+		w.Add(1)
 		go func() {
-			mainWaitGroup.Add(1)
-			defer mainWaitGroup.Done()
+			defer w.Done()
 			if tracker[:3] == "udp" {
 				//Adjust the format of the UDP tracker URL
 				trackerURL := strings.TrimPrefix(tracker, "udp://") //you need to strip the udp:// from the tracker to resolve the address later
@@ -132,7 +133,6 @@ func (this *TorrentFileToBuild) GetPeers() {
 					printWithColor(Red, err.Error())
 					return
 				}
-
 				//GENERATE A RANDOM ID FOR THE REQUEST
 				peerID, _ := generatePeerID()
 
@@ -151,19 +151,19 @@ func (this *TorrentFileToBuild) GetPeers() {
 				//parse the tracker response
 				TrackerResponseParsed := TrackerResponse{}
 				TrackerResponseParsed.Create(trackerAnnounceResponse)
-				//TrackerResponseParsed.Print()
+				TrackerResponseParsed.Print()
 				ipsAndPorts := TrackerResponseParsed.getIpAndPorts()
 				//we only add the ips and ports if they actually are responsive
 				//create all the connections and add them to the slice
-				var w sync.WaitGroup
+
 				for _, v := range ipsAndPorts {
+					w.Add(1)
 					go func() {
-						w.Add(1)
 						defer w.Done()
 						this.AddConnection(v, peerID)
 					}()
 				}
-				w.Wait()
+
 			} else {
 				infoHash := url.QueryEscape(string(this.InfoHash))
 				peerId, _ := generatePeerID()
@@ -182,9 +182,10 @@ func (this *TorrentFileToBuild) GetPeers() {
 				url += fmt.Sprint("&event=", "started")
 
 				httpClient := http.Client{
-					Timeout: 5 * time.Second,
+					Timeout: 2 * time.Second,
 				}
 				resp, err := httpClient.Get(url)
+				printWithColor(Yellow, "HTTP TRACKER RESPONDED")
 				if err != nil {
 					log.Println(err)
 					return
@@ -197,9 +198,8 @@ func (this *TorrentFileToBuild) GetPeers() {
 					return
 				}
 				for i := 0; i < len(BencodedResponse.Peers); i += 6 {
-					var w sync.WaitGroup
+					w.Add(1)
 					go func() {
-						w.Add(1)
 						defer w.Done()
 						peersStr := BencodedResponse.Peers
 						ip := fmt.Sprint(peersStr[i], ".", peersStr[i+1], ".", peersStr[i+2], ".", peersStr[i+3])
@@ -208,12 +208,11 @@ func (this *TorrentFileToBuild) GetPeers() {
 						fullIp := fmt.Sprint(ip, ":", portNumber)
 						this.AddConnection(fullIp, peerId)
 					}()
-					w.Wait()
 				}
 			}
 		}()
-		mainWaitGroup.Wait()
 	}
+	w.Wait()
 	printWithColor(Red, "FINISHED GET PEERS")
 }
 func (this *TorrentFileToBuild) pollGetPeersEveryCoupleMinutes() {
@@ -223,7 +222,7 @@ func (this *TorrentFileToBuild) pollGetPeersEveryCoupleMinutes() {
 				return
 			}
 			this.GetPeers()
-			time.Sleep(20 * time.Second)
+			time.Sleep(90 * time.Second)
 		}
 	}()
 }
@@ -238,7 +237,9 @@ func (this *TorrentFileToBuild) AddConnection(ipAndPort string, peerID [20]byte)
 		return
 	}
 	printWithColor(Green, "PEER CONNECTION ADDED SUCCESSFULLY")
-	this.Connections.Conns = append(this.Connections.Conns, Connection{Conn: conn, Using: false, Ip: ipAndPort, Healthy: true})
+	this.Connections.Mu.Lock()
+	this.Connections.Conns = append(this.Connections.Conns, Connection{Conn: conn, Using: false, Ip: ipAndPort, Healthy: true, UsedAtLeastOnce: false})
+	this.Connections.Mu.Unlock()
 }
 func (this *TorrentFileToBuild) isIpRepeatedAndHealthy(ip string) bool {
 	for i := 0; i < len(this.Connections.Conns); i++ {
@@ -261,8 +262,8 @@ func (this *TorrentFileToBuild) allFilesAreDownloaded() bool {
 
 // Blocks form a Piece, and Pieces form the file
 func (this *TorrentFileToBuild) downloadFileAsync() {
+	var w sync.WaitGroup
 	for {
-		var w sync.WaitGroup
 		//loop all the pieces and request them
 		for fileIndex, v := range this.ListOfHashes {
 			if v.Completed {
@@ -271,29 +272,30 @@ func (this *TorrentFileToBuild) downloadFileAsync() {
 			//get any connection that is not being currently used
 			connectionToUse := this.GetUnusedConnection()
 			connectionToUse.Using = true
-			go func() {
-				w.Add(1)
+			printWithColor(Gray, fmt.Sprint("IP WE ARE USING:", connectionToUse.Ip))
+			//check if this is the final piece
+			final := fileIndex == this.TotalPieces
+			w.Add(1)
+			go func(conn *Connection) {
 				defer w.Done()
-				//check if this is the final piece
-				final := fileIndex == this.TotalPieces
 				//get the file piece, the one thats composed by all the blocks and check if the hash is correct
-				data, err := this.askForFilePiece(fileIndex, v.Hash, connectionToUse, final)
+				data, err := this.askForFilePiece(fileIndex, v.Hash, conn, final)
+				conn.Using = false
 				if err != nil {
 					printWithColor(Red, err.Error())
 					//WriteToErrorstxt(fileIndex)
 					return
 				}
-				//Show completed message
-				printWithColor(Green, fmt.Sprint(" Hash match on file ", fileIndex))
+				printWithColor(Green, fmt.Sprint("Hash matched - FILE:", fileIndex, " | IP downloaded from:", conn.Ip))
 				//set completed to true - need to do it like this, because v is a copy of the value and not a reference
 				this.ListOfHashes[fileIndex].Completed = true
-
 				//Write to the temp file the downloaded piece
 				indexStart := this.PieceSize * fileIndex
 				this.writeToTempFile(data, indexStart)
-			}()
+			}(connectionToUse)
 		}
 		if this.allFilesAreDownloaded() {
+			printWithColor(Red, "FINISHED")
 			break
 		}
 		w.Wait()
@@ -305,11 +307,13 @@ func (this *TorrentFileToBuild) GetUnusedConnection() *Connection {
 	for {
 		conns := this.Connections.Conns
 		for i := 0; i < len(conns); i++ {
-			if !conns[i].Using && conns[i].Healthy {
+			if conns[i].Using == false && conns[i].Healthy {
+				//conns[i].UsedAtLeastOnce = true
 				return &conns[i]
 			}
+			time.Sleep(1 * time.Millisecond)
 		}
-		time.Sleep(1 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -317,12 +321,13 @@ func (this *TorrentFileToBuild) GetUnusedConnection() *Connection {
 func (this *TorrentFileToBuild) askForFilePiece(fileIndex int, fileHash []byte, connectionToUse *Connection, Final bool) ([]byte, error) {
 	//download the piece
 	data, err := connectToPeerAndRequestWholePiece(connectionToUse, fileIndex, this, Final)
-	connectionToUse.Using = false
 	//if there was an error mark the connection as unhealthy
 	if err != nil {
 		connectionToUse.Healthy = false
+		connectionToUse.Conn.Close()
 		return nil, err
 	}
+
 	//hash of the whole piece gotten
 	wholePieceSha1Hash := GetSha1Hash(data)
 	if reflect.DeepEqual(fileHash, wholePieceSha1Hash) {

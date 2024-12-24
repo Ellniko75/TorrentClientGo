@@ -20,13 +20,22 @@ import (
 
 // contains all the info and functions necessary to download the file
 type TorrentFileToBuild struct {
-	Name           string //name of the file
-	PieceSize      int    //size of each piece to download
-	TotalPieces    int
-	BlockLength    int
-	AmountOfBlocks int
-	MainTracker    string
-	FileLength     int
+	Name            string //name of the file
+	PieceSize       int    //size of each piece to download
+	TotalPieces     int
+	BlockLength     int
+	AmountOfBlocks  int
+	MainTracker     string
+	FileLength      int
+	Finished        bool
+	TotalDownloaded struct {
+		Downloaded int64
+		mu         sync.Mutex
+	}
+	Uploaded struct {
+		Uploaded int64
+		mu       sync.Mutex
+	}
 	Connections    Connections //slice of all peers that have the file
 	ListOfTrackers []string    //list of all the trackers
 	ListOfHashes   []Hash      //hashes for each piece of the file
@@ -74,7 +83,9 @@ func (this *TorrentFileToBuild) CalculateTotalPiecesAndBlockLength(info *Torrent
 	this.TotalPieces = this.FileLength / this.PieceSize
 	this.BlockLength = 16384
 	this.AmountOfBlocks = this.PieceSize / this.BlockLength //Calculate the amount of blocks per piece
-
+	this.Uploaded.Uploaded = 0
+	this.TotalDownloaded.Downloaded = 0
+	this.Finished = false
 	printWithColor(Red, fmt.Sprint("FILE TOTAL SIZE: ", this.FileLength))
 	printWithColor(Red, fmt.Sprint("Pieces size: ", this.PieceSize))
 	printWithColor(Red, fmt.Sprint("Total pieces: ", this.TotalPieces+1)) //need to add +1 since its an index that starts counting form 0
@@ -91,6 +102,8 @@ func (this *TorrentFileToBuild) LoadMetaData(fileLength int, pieceSize int) {
 	this.BlockLength = 16384
 	this.AmountOfBlocks = this.PieceSize / this.BlockLength //Calculate the amount of blocks per piece
 
+	this.Uploaded.Uploaded = 0
+	this.TotalDownloaded.Downloaded = 0
 	printWithColor(Red, fmt.Sprint("FILE TOTAL SIZE: ", this.FileLength))
 	printWithColor(Red, fmt.Sprint("Pieces size: ", this.PieceSize))
 	printWithColor(Red, fmt.Sprint("Total pieces: ", this.TotalPieces+1)) //need to add +1 since its an index that starts counting form 0
@@ -107,7 +120,7 @@ func (this *TorrentFileToBuild) LoadTrackers(torrentInfo *TorrentFileInfo) {
 }
 
 // Loop all the torrent trackers and get the peers that have the file
-func (this *TorrentFileToBuild) GetPeers() {
+func (this *TorrentFileToBuild) GetPeers(firstTime bool) {
 	var w sync.WaitGroup
 	for _, tracker := range this.ListOfTrackers {
 		w.Add(1)
@@ -136,13 +149,20 @@ func (this *TorrentFileToBuild) GetPeers() {
 				//GENERATE A RANDOM ID FOR THE REQUEST
 				peerID, _ := generatePeerID()
 
+				eventType := getEventTypeForUDPTracker(firstTime, this)
+				left := (int64(this.FileLength) - this.TotalDownloaded.Downloaded)
 				//GET ALL THE PEERS THAT HAVE THE FILE FROM THE TRACKERS
 				trackerAnnounceResponse, _, err := getPeersFromUdp(
 					conn,
 					this.InfoHash,
 					connectionIDResponse,
 					transactionIDResponse,
-					peerID)
+					peerID,
+					this.TotalDownloaded.Downloaded,
+					left,
+					this.Uploaded.Uploaded,
+					eventType)
+
 				if err != nil {
 					printWithColor(Red, err.Error())
 					return
@@ -163,23 +183,28 @@ func (this *TorrentFileToBuild) GetPeers() {
 						this.AddConnection(v, peerID)
 					}()
 				}
-
 			} else {
 				infoHash := url.QueryEscape(string(this.InfoHash))
 				peerId, _ := generatePeerID()
 				peerIdArrByte := []byte(peerId[:])
 				port := 6881
-				downloaded := 0
-				left := 0
-
+				//load the url query params
 				url := tracker
 				url += fmt.Sprint("?info_hash=", infoHash)
 				url += fmt.Sprint("&peer_id=", string(peerIdArrByte))
 				url += fmt.Sprint("&ip=", "255.255.255.255")
 				url += fmt.Sprint("&port=", port)
-				url += fmt.Sprint("&downloaded=", downloaded)
+				url += fmt.Sprint("&downloaded=", this.TotalDownloaded.Downloaded)
+				left := this.FileLength - int(this.TotalDownloaded.Downloaded)
 				url += fmt.Sprint("&left=", left)
-				url += fmt.Sprint("&event=", "started")
+				url += fmt.Sprint("&uploaded=", this.Uploaded.Uploaded)
+				if firstTime {
+					event := "started"
+					if this.TotalDownloaded.Downloaded == int64(this.FileLength) {
+						event = "completed"
+					}
+					url += fmt.Sprint("&event=", event)
+				}
 
 				httpClient := http.Client{
 					Timeout: 2 * time.Second,
@@ -191,12 +216,14 @@ func (this *TorrentFileToBuild) GetPeers() {
 					return
 				}
 				printWithColor(Yellow, "HTTP tracker response got")
+				//parse the request of the http tracker
 				BencodedResponse := BencodedResponseHTTPTracker{}
 				err = bencode.Unmarshal(resp.Body, &BencodedResponse)
 				if err != nil {
 					log.Println("Error unmarshaling the http response into bencoded data")
 					return
 				}
+				//add the connections
 				for i := 0; i < len(BencodedResponse.Peers); i += 6 {
 					w.Add(1)
 					go func() {
@@ -218,22 +245,28 @@ func (this *TorrentFileToBuild) GetPeers() {
 func (this *TorrentFileToBuild) pollGetPeersEveryCoupleMinutes() {
 	go func() {
 		for {
+			time.Sleep(10 * time.Second)
+
 			if this.allFilesAreDownloaded() {
+				this.GetPeers(false)
 				return
+			} else {
+				this.GetPeers(false)
 			}
-			this.GetPeers()
-			time.Sleep(90 * time.Second)
 		}
 	}()
 }
 
 // Creates the connections if they are not repeated and adds them to the slice
 func (this *TorrentFileToBuild) AddConnection(ipAndPort string, peerID [20]byte) {
+	fmt.Println(ipAndPort)
 	if this.isIpRepeatedAndHealthy(ipAndPort) {
+		fmt.Println("ip repeated")
 		return
 	}
 	conn, err := initiatePeerConnection(ipAndPort, this.InfoHash, peerID)
 	if err != nil {
+		printWithColor(Red, fmt.Sprint("Could not establish connection with ", ipAndPort))
 		return
 	}
 	printWithColor(Green, "PEER CONNECTION ADDED SUCCESSFULLY")
@@ -262,6 +295,7 @@ func (this *TorrentFileToBuild) allFilesAreDownloaded() bool {
 
 // Blocks form a Piece, and Pieces form the file
 func (this *TorrentFileToBuild) downloadFileAsync() {
+	fmt.Println("STARTED DOWNLOAD")
 	var w sync.WaitGroup
 	for {
 		//loop all the pieces and request them
@@ -283,7 +317,7 @@ func (this *TorrentFileToBuild) downloadFileAsync() {
 				conn.Using = false
 				if err != nil {
 					printWithColor(Red, err.Error())
-					//WriteToErrorstxt(fileIndex)
+					WriteToErrorstxt(fmt.Sprint("Error with IP:", conn.Ip, err.Error()))
 					return
 				}
 				printWithColor(Green, fmt.Sprint("Hash matched - FILE:", fileIndex, " | IP downloaded from:", conn.Ip))
@@ -292,10 +326,15 @@ func (this *TorrentFileToBuild) downloadFileAsync() {
 				//Write to the temp file the downloaded piece
 				indexStart := this.PieceSize * fileIndex
 				this.writeToTempFile(data, indexStart)
+				//increment the total data downloaded
+				this.TotalDownloaded.mu.Lock()
+				this.TotalDownloaded.Downloaded += int64(len(data))
+				this.TotalDownloaded.mu.Unlock()
 			}(connectionToUse)
 		}
 		if this.allFilesAreDownloaded() {
 			printWithColor(Red, "FINISHED")
+			this.Finished = true
 			break
 		}
 		w.Wait()
@@ -308,7 +347,6 @@ func (this *TorrentFileToBuild) GetUnusedConnection() *Connection {
 		conns := this.Connections.Conns
 		for i := 0; i < len(conns); i++ {
 			if conns[i].Using == false && conns[i].Healthy {
-				//conns[i].UsedAtLeastOnce = true
 				return &conns[i]
 			}
 			time.Sleep(1 * time.Millisecond)
@@ -505,5 +543,40 @@ func (this *TorrentFileToBuild) deleteTempFile() {
 	err := os.Remove("partial.bin")
 	if err != nil {
 		log.Println(err)
+	}
+}
+
+func (this *TorrentFileToBuild) shareCurrentTorrent() {
+
+	file, err := os.Open("partial.bin")
+	if err != nil {
+		log.Println("NO SE PUDO LEER PARTIAL.BIN")
+	}
+	defer file.Close()
+
+	l, err := net.Listen("tcp", ":6881")
+	printWithColor(Green, "LISTENING FOR INCOMING CONNECTIONS")
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			printWithColor(Red, fmt.Sprint("ERROR EN ACEPTAR CONEXION INCOMING:", err))
+		}
+		go this.HandleConnection(conn)
+	}
+}
+func (this *TorrentFileToBuild) HandleConnection(currentCon net.Conn) {
+	for {
+		buf := make([]byte, 1000)
+		n, err := currentCon.Read(buf)
+		if err != nil {
+			printWithColor(Red, fmt.Sprint("Error on handling incoming connection:", err))
+		}
+		if n == 0 {
+			printWithColor(Green, "0 BYTES RECEIVED")
+		}
+		printWithColor(Green, fmt.Sprint("RECEIVED:", buf[:n]))
+		protocolMsgLength := binary.BigEndian.Uint16(buf[:1])
+		protocolMessage := buf[1:protocolMsgLength]
+		fmt.Println("PROTOCOL MESSAGE:", protocolMessage)
 	}
 }

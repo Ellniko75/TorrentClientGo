@@ -9,7 +9,6 @@ import (
 
 // Connects to the peer anr requests the whole file, block by block
 func connectToPeerAndRequestWholePiece(conn *Connection, fileIndex int, torrentInfo *TorrentFileToBuild, final bool) ([]byte, error) {
-
 	AmountOfBlocks := torrentInfo.AmountOfBlocks
 	BlockLength := torrentInfo.BlockLength
 	//if we are downloading the final piece, we have to adjust the block length, since it usually happens that you cannot divide all files equally by 16kb
@@ -28,7 +27,6 @@ func connectToPeerAndRequestWholePiece(conn *Connection, fileIndex int, torrentI
 	for i := 0; i < AmountOfBlocks; i++ {
 		blockOffset := BlockLength * i
 		//send the request for the data
-
 		data, err := requestBlock(conn.Conn, fileIndex, blockOffset, BlockLength)
 		if err != nil {
 			return nil, err
@@ -144,7 +142,7 @@ func requestBlock(conn net.Conn, fileIndex int, blockOffset int, blockLength int
 	}
 
 	//clean up the connection if there is anything there yet
-	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 	var response = make([]byte, 1000000)
 	totalRead := 0
 	actualData := []byte{}

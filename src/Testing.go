@@ -47,7 +47,7 @@ func WriteToOkstxt(fileIndex int) {
 	}
 }
 
-func WriteToErrorstxt(fileIndex int) {
+func WriteToErrorstxt(ErrorDetails string) {
 	file, err := os.OpenFile("Errors.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		fmt.Println("Error opening file:", err)
@@ -55,7 +55,7 @@ func WriteToErrorstxt(fileIndex int) {
 	}
 	defer file.Close() // Ensure the file is closed after we're done
 
-	_, err = file.WriteString(fmt.Sprint("Error on index: ", fileIndex, "\n"))
+	_, err = file.WriteString(fmt.Sprint("Error on index: ", ErrorDetails, "\n"))
 
 	if err != nil {
 		fmt.Println("Error writing to file")

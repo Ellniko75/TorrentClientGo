@@ -69,12 +69,21 @@ func initiateUdpConnection(conn *net.UDPConn, transactionID int32) (uint32, uint
 	return transactionIDResponse, connectionIDResponse, nil
 }
 
-func getPeersFromUdp(conn *net.UDPConn, hash []byte, connectionId uint64, transactionID uint32, peerID [20]byte) ([]byte, int, error) {
+func getEventTypeForUDPTracker(firstTime bool, torrentBuilding *TorrentFileToBuild) int32 {
+	if firstTime {
+		return 1
+	}
+	isFinished := torrentBuilding.TotalDownloaded.Downloaded == int64(torrentBuilding.FileLength)
+	if isFinished {
+		return 3
+	}
+
+	return 0
+}
+
+func getPeersFromUdp(conn *net.UDPConn, hash []byte, connectionId uint64, transactionID uint32, peerID [20]byte, downloaded int64, left int64, uploaded int64, event int32) ([]byte, int, error) {
 	currentFunctionName := "getPeers()"
 
-	if len(hash) != 20 {
-		log.Println("ERROR ON ", currentFunctionName, " THE HASH MUST BE OF 20 BYTES")
-	}
 	//CREATE THE PACKET TO SEND
 	var packet bytes.Buffer
 
@@ -108,16 +117,19 @@ func getPeersFromUdp(conn *net.UDPConn, hash []byte, connectionId uint64, transa
 	if err := binary.Write(&packet, binary.BigEndian, peerID); err != nil {
 		log.Fatal("Error writing peerID:", err)
 	}
-	if err := binary.Write(&packet, binary.BigEndian, int64(200)); err != nil {
+	if err := binary.Write(&packet, binary.BigEndian, int64(downloaded)); err != nil {
 		log.Fatal("Error writing downloaded:", err)
 	}
+	//this is the left parameter, somehow if i put 0 here, it will return my own IP and port from the qbitorrent that has the file downloaded
+	//but if i put this to the actual size of data that's left to download, it will only return my own ip with the port THIS program is using
+	//idk
 	if err := binary.Write(&packet, binary.BigEndian, int64(0)); err != nil {
 		log.Fatal("Error writing left:", err)
 	}
-	if err := binary.Write(&packet, binary.BigEndian, int64(0)); err != nil {
+	if err := binary.Write(&packet, binary.BigEndian, int64(uploaded)); err != nil {
 		log.Fatal("Error writing uploaded:", err)
 	}
-	if err := binary.Write(&packet, binary.BigEndian, int32(0)); err != nil {
+	if err := binary.Write(&packet, binary.BigEndian, int32(event)); err != nil {
 		log.Fatal("Error writing event:", err)
 	}
 	if err := binary.Write(&packet, binary.BigEndian, int32(0)); err != nil {

@@ -5,12 +5,14 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"time"
+
 	"strings"
+
 	"torrent/pythonScripts"
 
 	"github.com/jackpal/bencode-go"
 
-	"net/http"
 	_ "net/http/pprof"
 )
 
@@ -40,11 +42,8 @@ type TorrentFileInfo struct {
 }
 
 func main() {
-	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
-
-	torrentPath := "../torrents/torrentCustom.torrent"
+	ResetOksAndErrors()
+	torrentPath := "../torrents/dragonball.torrent"
 
 	file, err := os.Open(torrentPath)
 	defer file.Close()
@@ -62,6 +61,9 @@ func main() {
 	hash, err := pythonScripts.GetInfoHash(torrentPath)
 	printWithColor(Blue, fmt.Sprint("HASH: ", hash))
 
+	//sigChan := make(chan os.Signal, 1)
+	//signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
 	torrentIsSingleFile := torrentInfo.Info.Length > 0
 	if torrentIsSingleFile {
 		TorrentFileToBuild := TorrentFileToBuild{}
@@ -71,8 +73,24 @@ func main() {
 		TorrentFileToBuild.LoadTrackers(&torrentInfo)
 		TorrentFileToBuild.CalculateTotalPiecesAndBlockLength(&torrentInfo)
 		TorrentFileToBuild.writeTempFile(TorrentFileToBuild.tempFileInit())
-		TorrentFileToBuild.GetPeers()
-		TorrentFileToBuild.pollGetPeersEveryCoupleMinutes()
+		//go TorrentFileToBuild.shareCurrentTorrent()
+		TorrentFileToBuild.GetPeers(true)
+		//TorrentFileToBuild.pollGetPeersEveryCoupleMinutes()
+		go func() {
+
+			for {
+				healthyConns := []string{}
+
+				for _, v := range TorrentFileToBuild.Connections.Conns {
+					if v.Healthy {
+						healthyConns = append(healthyConns, v.Ip)
+					}
+				}
+				printWithColor(Yellow, fmt.Sprint("healthy conns:", healthyConns))
+				time.Sleep(3 * time.Second)
+			}
+		}()
+
 		TorrentFileToBuild.downloadFileAsync()
 		TorrentFileToBuild.writeFileInPieces("../output/", TorrentFileToBuild.Name, 0, TorrentFileToBuild.FileLength)
 		TorrentFileToBuild.deleteTempFile()
@@ -84,8 +102,8 @@ func main() {
 		TorrentFileToBuild.LoadTrackers(&torrentInfo)
 		TorrentFileToBuild.LoadMetaData(totalSizeOfFile, torrentInfo.Info.PieceLength)
 		TorrentFileToBuild.writeTempFile(TorrentFileToBuild.tempFileInit())
-		TorrentFileToBuild.GetPeers()
-		//TorrentFileToBuild.pollGetPeersEveryCoupleMinutes()
+		TorrentFileToBuild.GetPeers(true)
+		TorrentFileToBuild.pollGetPeersEveryCoupleMinutes()
 		TorrentFileToBuild.downloadFileAsync()
 		//write each file to the disk
 		start := 0
@@ -97,6 +115,7 @@ func main() {
 		}
 		TorrentFileToBuild.deleteTempFile()
 	}
+	//<-sigChan
 
 }
 

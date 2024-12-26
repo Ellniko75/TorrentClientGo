@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"net"
 	"time"
 )
@@ -112,55 +113,96 @@ func handleHandshake(infoHash []byte, peerID [20]byte, conn net.Conn) ([]byte, e
 
 // Requests a block of a piece, normaly a piece is formed by various blocks
 func requestBlock(conn net.Conn, fileIndex int, blockOffset int, blockLength int) ([]byte, error) {
-	//load the payload to send to the peer
-	var buff bytes.Buffer
-	//Size of the request (Message Length)
-	if err := binary.Write(&buff, binary.BigEndian, int32(13)); err != nil {
-		return nil, createError("requestBlock() Message Length ", err.Error())
-	}
-	//indicate that this is a request with the 6 (Message ID)
-	if err := binary.Write(&buff, binary.BigEndian, byte(6)); err != nil {
-		return nil, createError("requestBlock() Message ID  ", err.Error())
-	}
-	//The index of the piece being requested. (Piece Index)
-	if err := binary.Write(&buff, binary.BigEndian, int32(fileIndex)); err != nil {
-		return nil, createError("requestBlock() Piece Index", err.Error())
-	}
-	//Block Offset
-	if err := binary.Write(&buff, binary.BigEndian, int32(blockOffset)); err != nil {
-		return nil, createError("requestBlock() Block Length", err.Error())
-	}
-	//Block length
-	if err := binary.Write(&buff, binary.BigEndian, int32(blockLength)); err != nil {
-		return nil, createError("requestBlock() ", err.Error())
-	}
 
-	//send the payload requesting the file
-	n, err := conn.Write(buff.Bytes())
-	if n == 0 || err != nil {
-		return nil, createError("requestBlock() on conn.Write()", err.Error())
+	err := sendInterestedPayloadToConnection(conn)
+	if err != nil {
+		return nil, err
 	}
-
 	//clean up the connection if there is anything there yet
-	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	var response = make([]byte, 1000000)
-	totalRead := 0
+	//conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 	actualData := []byte{}
+	var response = make([]byte, 100000)
 	for {
-		n, err = conn.Read(response)
-		totalRead += n
-		if n == 5 {
-			//fmt.Println("this is shit data that does not serve for anything", response[:n])
+		//Read the connection data and store it on response
+		n, err := conn.Read(response)
+
+		//get the type of message we got
+		idOfMessage := getIdOfPeerMessage(response[:n])
+
+		//handle the metadata response
+		responseIsMetaData := n == 5
+		if responseIsMetaData {
+			//if it is an unchoke message we send the request
+			if idOfMessage == 1 {
+				err = sendRequestPayloadToConnection(conn, fileIndex, blockOffset, blockLength)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if idOfMessage == 0 {
+				fmt.Println("I GOT CHOKED BY: ", conn.RemoteAddr())
+			}
+			//we always continue listening for data if we encounter metadata since we don't want to append it to the actual data of the file
 			continue
 		}
+		//add the data
 		actualData = append(actualData, response[:n]...)
 
 		if err != nil {
 			//if there is an error but we haven't tried twice yet, we try again
 			return nil, createError("requestBlock() on conn.Write()", err.Error())
 		}
-		if totalRead >= blockLength {
+		//if we got enough data we return it
+		if len(actualData) >= blockLength {
 			return actualData[13:], nil
 		}
 	}
+}
+func sendRequestPayloadToConnection(conn net.Conn, fileIndex int, blockOffset int, blockLength int) error {
+	//load the payload to send to the peer
+	var buff bytes.Buffer
+	//Size of the request (Message Length)
+	if err := binary.Write(&buff, binary.BigEndian, int32(13)); err != nil {
+		return createError("sendRequestPayloadToConnection() Message Length ", err.Error())
+	}
+	//indicate that this is a request with the 6 (Message ID)
+	if err := binary.Write(&buff, binary.BigEndian, byte(6)); err != nil {
+		return createError("sendRequestPayloadToConnection() Message ID  ", err.Error())
+	}
+	//The index of the piece being requested. (Piece Index)
+	if err := binary.Write(&buff, binary.BigEndian, int32(fileIndex)); err != nil {
+		return createError("sendRequestPayloadToConnection() Piece Index", err.Error())
+	}
+	//Block Offset
+	if err := binary.Write(&buff, binary.BigEndian, int32(blockOffset)); err != nil {
+		return createError("sendRequestPayloadToConnection() Block Length", err.Error())
+	}
+	//Block length
+	if err := binary.Write(&buff, binary.BigEndian, int32(blockLength)); err != nil {
+		return createError("sendRequestPayloadToConnection() ", err.Error())
+	}
+
+	//send the payload requesting the file
+	_, err := conn.Write(buff.Bytes())
+
+	return err
+}
+func sendInterestedPayloadToConnection(conn net.Conn) error {
+	var buff bytes.Buffer
+	//Write Response Length
+	if err := binary.Write(&buff, binary.BigEndian, int32(1)); err != nil {
+		return createError("sendRequestPayloadToConnection() ", err.Error())
+	}
+	if err := binary.Write(&buff, binary.BigEndian, byte(2)); err != nil {
+		return createError("sendRequestPayloadToConnection() ", err.Error())
+	}
+	//send the payload requesting the file
+	_, err := conn.Write(buff.Bytes())
+
+	return err
+}
+
+func getIdOfPeerMessage(data []byte) byte {
+	idOfMessage := data[4:5]
+	return idOfMessage[0]
 }

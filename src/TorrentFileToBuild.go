@@ -175,7 +175,6 @@ func (this *TorrentFileToBuild) GetPeers(firstTime bool) {
 				ipsAndPorts := TrackerResponseParsed.getIpAndPorts()
 				//we only add the ips and ports if they actually are responsive
 				//create all the connections and add them to the slice
-
 				for _, v := range ipsAndPorts {
 					w.Add(1)
 					go func() {

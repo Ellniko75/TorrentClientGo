@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"time"
 
 	"strings"
 
@@ -43,7 +42,7 @@ type TorrentFileInfo struct {
 
 func main() {
 	ResetOksAndErrors()
-	torrentPath := "../torrents/dragonball.torrent"
+	torrentPath := "../torrents/xoka.torrent"
 
 	file, err := os.Open(torrentPath)
 	defer file.Close()
@@ -76,24 +75,24 @@ func main() {
 		//go TorrentFileToBuild.shareCurrentTorrent()
 		TorrentFileToBuild.GetPeers(true)
 		//TorrentFileToBuild.pollGetPeersEveryCoupleMinutes()
-		go func() {
+		/*
+			go func() {
 
-			for {
-				healthyConns := []string{}
+				for {
+					healthyConns := []string{}
 
-				for _, v := range TorrentFileToBuild.Connections.Conns {
-					if v.Healthy {
-						healthyConns = append(healthyConns, v.Ip)
+					for _, v := range TorrentFileToBuild.Connections.Conns {
+						if v.Healthy {
+							healthyConns = append(healthyConns, v.Ip)
+						}
 					}
+					printWithColor(Yellow, fmt.Sprint("healthy conns:", healthyConns))
+					time.Sleep(3 * time.Second)
 				}
-				printWithColor(Yellow, fmt.Sprint("healthy conns:", healthyConns))
-				time.Sleep(3 * time.Second)
-			}
-		}()
-
+			}()*/
 		TorrentFileToBuild.downloadFileAsync()
 		TorrentFileToBuild.writeFileInPieces("../output/", TorrentFileToBuild.Name, 0, TorrentFileToBuild.FileLength)
-		TorrentFileToBuild.deleteTempFile()
+		//orrentFileToBuild.deleteTempFile()
 	} else {
 		totalSizeOfFile := getTotalSizeOfMulitpleFilesTorrent(&torrentInfo)
 		TorrentFileToBuild := TorrentFileToBuild{}
@@ -116,7 +115,6 @@ func main() {
 		TorrentFileToBuild.deleteTempFile()
 	}
 	//<-sigChan
-
 }
 
 func getHexHash(torrentPath string) (string, error) {

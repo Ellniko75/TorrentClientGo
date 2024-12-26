@@ -42,7 +42,7 @@ type TorrentFileInfo struct {
 
 func main() {
 	ResetOksAndErrors()
-	torrentPath := "../torrents/xoka.torrent"
+	torrentPath := "../torrents/dragonball.torrent"
 
 	file, err := os.Open(torrentPath)
 	defer file.Close()
@@ -75,21 +75,6 @@ func main() {
 		//go TorrentFileToBuild.shareCurrentTorrent()
 		TorrentFileToBuild.GetPeers(true)
 		//TorrentFileToBuild.pollGetPeersEveryCoupleMinutes()
-		/*
-			go func() {
-
-				for {
-					healthyConns := []string{}
-
-					for _, v := range TorrentFileToBuild.Connections.Conns {
-						if v.Healthy {
-							healthyConns = append(healthyConns, v.Ip)
-						}
-					}
-					printWithColor(Yellow, fmt.Sprint("healthy conns:", healthyConns))
-					time.Sleep(3 * time.Second)
-				}
-			}()*/
 		TorrentFileToBuild.downloadFileAsync()
 		TorrentFileToBuild.writeFileInPieces("../output/", TorrentFileToBuild.Name, 0, TorrentFileToBuild.FileLength)
 		//orrentFileToBuild.deleteTempFile()

@@ -95,7 +95,7 @@ func contains(value string, slice []string) bool {
 
 func getDivisibleNumber(number int) int {
 	for i := 3; i < 10000; i++ {
-		if number%i == 0 {
+		if number%i == 0 && number/i <= 16384 {
 			return i
 		}
 	}

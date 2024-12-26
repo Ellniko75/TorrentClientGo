@@ -51,12 +51,13 @@ type Connections struct {
 	Mu    sync.Mutex
 }
 type Connection struct {
-	Conn            net.Conn
-	Ip              string
-	Using           bool //currently using
-	Healthy         bool //if the connection has not responded we mark its healthy as false
-	Speed           int  //Speed of that connection
-	UsedAtLeastOnce bool
+	Conn     net.Conn
+	BitField map[int]bool
+	Ip       string
+	Using    bool //currently using
+	Healthy  bool //if the connection has not responded we mark its healthy as false
+	Speed    int  //Speed of that connection
+
 }
 type BencodedResponseHTTPTracker struct {
 	Interval int    `bencode:"interval"`
@@ -258,19 +259,17 @@ func (this *TorrentFileToBuild) pollGetPeersEveryCoupleMinutes() {
 
 // Creates the connections if they are not repeated and adds them to the slice
 func (this *TorrentFileToBuild) AddConnection(ipAndPort string, peerID [20]byte) {
-	fmt.Println(ipAndPort)
 	if this.isIpRepeatedAndHealthy(ipAndPort) {
-		fmt.Println("ip repeated")
 		return
 	}
-	conn, err := initiatePeerConnection(ipAndPort, this.InfoHash, peerID)
+	conn, bitfield, err := initiatePeerConnection(ipAndPort, this.InfoHash, peerID)
 	if err != nil {
 		printWithColor(Red, fmt.Sprint("Could not establish connection with ", ipAndPort))
 		return
 	}
 	printWithColor(Green, "PEER CONNECTION ADDED SUCCESSFULLY")
 	this.Connections.Mu.Lock()
-	this.Connections.Conns = append(this.Connections.Conns, Connection{Conn: conn, Using: false, Ip: ipAndPort, Healthy: true, UsedAtLeastOnce: false})
+	this.Connections.Conns = append(this.Connections.Conns, Connection{Conn: conn, Using: false, Ip: ipAndPort, Healthy: true, BitField: bitfield})
 	this.Connections.Mu.Unlock()
 }
 func (this *TorrentFileToBuild) isIpRepeatedAndHealthy(ip string) bool {
@@ -295,22 +294,21 @@ func (this *TorrentFileToBuild) allFilesAreDownloaded() bool {
 // Blocks form a Piece, and Pieces form the file
 func (this *TorrentFileToBuild) downloadFileAsync() {
 	fmt.Println("STARTED DOWNLOAD")
-	var w sync.WaitGroup
 	for {
 		//loop all the pieces and request them
 		for fileIndex, v := range this.ListOfHashes {
 			if v.Completed {
 				continue
 			}
+			fmt.Println("missing", fileIndex)
 			//get any connection that is not being currently used
-			connectionToUse := this.GetUnusedConnection()
+			connectionToUse := this.GetUnusedConnection(fileIndex)
 			connectionToUse.Using = true
-			printWithColor(Gray, fmt.Sprint("IP WE ARE USING:", connectionToUse.Ip))
+			printWithColor(Gray, fmt.Sprint("IP WE ARE USING: ", connectionToUse.Ip))
 			//check if this is the final piece
 			final := fileIndex == this.TotalPieces
-			w.Add(1)
+
 			go func(conn *Connection) {
-				defer w.Done()
 				//get the file piece, the one thats composed by all the blocks and check if the hash is correct
 				data, err := this.askForFilePiece(fileIndex, v.Hash, conn, final)
 				conn.Using = false
@@ -320,6 +318,7 @@ func (this *TorrentFileToBuild) downloadFileAsync() {
 					return
 				}
 				printWithColor(Green, fmt.Sprint("Hash matched - FILE:", fileIndex, " | IP downloaded from:", conn.Ip))
+				WriteToOkstxt(fileIndex)
 				//set completed to true - need to do it like this, because v is a copy of the value and not a reference
 				this.ListOfHashes[fileIndex].Completed = true
 				//Write to the temp file the downloaded piece
@@ -332,20 +331,19 @@ func (this *TorrentFileToBuild) downloadFileAsync() {
 			}(connectionToUse)
 		}
 		if this.allFilesAreDownloaded() {
-			printWithColor(Red, "FINISHED")
 			this.Finished = true
 			break
 		}
-		w.Wait()
 	}
+	printWithColor(Red, "FINISHED")
 }
 
 // runs on main thread, constantly checking if there are any connection up for use
-func (this *TorrentFileToBuild) GetUnusedConnection() *Connection {
+func (this *TorrentFileToBuild) GetUnusedConnection(fileIndex int) *Connection {
 	for {
 		conns := this.Connections.Conns
 		for i := 0; i < len(conns); i++ {
-			if conns[i].Using == false && conns[i].Healthy {
+			if !conns[i].Using && conns[i].Healthy && conns[i].BitField[fileIndex] {
 				return &conns[i]
 			}
 			time.Sleep(1 * time.Millisecond)
@@ -379,7 +377,7 @@ func (this *TorrentFileToBuild) askForFilePiece(fileIndex int, fileHash []byte, 
 			return data[5:], nil
 		}
 	}
-	return nil, createError("askForFilePiece()", fmt.Sprint("THE HASH DIDN'T MATCH, FILE: ", fileIndex, " LENGTH GOTTEN: ", len(data)))
+	return nil, createError("askForFilePiece()", fmt.Sprint("THE HASH DIDN'T MATCH, FILE: ", fileIndex, " FROM IP: ", connectionToUse.Conn.RemoteAddr()))
 }
 
 // gets the partial.bin file that holds all the binary data, and writes it in chunks to the desired path and with the desired name

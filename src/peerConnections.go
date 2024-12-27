@@ -22,8 +22,6 @@ func connectToPeerAndRequestWholePiece(conn *Connection, fileIndex int, torrentI
 		divisions := getDivisibleNumber(missing)
 		AmountOfBlocks = divisions
 		BlockLength = missing / AmountOfBlocks
-
-		fmt.Println("Missing: ", missing, "block length: ", BlockLength, "Amount of blocks: ", AmountOfBlocks)
 	}
 
 	wholePiece := []byte{}
@@ -49,7 +47,7 @@ func initiatePeerConnection(ip string, infoHash []byte, peerId [20]byte) (net.Co
 	if err != nil {
 		return nil, nil, err
 	}
-
+	//make the handshake and get the bitfield
 	_, bitfield, err := handleHandshake(infoHash, peerId, connection)
 	if err != nil {
 		return nil, bitfield, err

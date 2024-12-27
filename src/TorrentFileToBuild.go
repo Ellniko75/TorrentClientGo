@@ -20,6 +20,7 @@ import (
 
 // contains all the info and functions necessary to download the file
 type TorrentFileToBuild struct {
+	PeerId          [20]byte
 	Name            string //name of the file
 	PieceSize       int    //size of each piece to download
 	TotalPieces     int
@@ -84,9 +85,14 @@ func (this *TorrentFileToBuild) CalculateTotalPiecesAndBlockLength(info *Torrent
 	this.TotalPieces = this.FileLength / this.PieceSize
 	this.BlockLength = 16384
 	this.AmountOfBlocks = this.PieceSize / this.BlockLength //Calculate the amount of blocks per piece
+
 	this.Uploaded.Uploaded = 0
 	this.TotalDownloaded.Downloaded = 0
 	this.Finished = false
+
+	//generate a peerID and allocate it
+	peerId, _ := generatePeerID()
+	this.PeerId = peerId
 	printWithColor(Red, fmt.Sprint("FILE TOTAL SIZE: ", this.FileLength))
 	printWithColor(Red, fmt.Sprint("Pieces size: ", this.PieceSize))
 	printWithColor(Red, fmt.Sprint("Total pieces: ", this.TotalPieces+1)) //need to add +1 since its an index that starts counting form 0
@@ -105,6 +111,11 @@ func (this *TorrentFileToBuild) LoadMetaData(fileLength int, pieceSize int) {
 
 	this.Uploaded.Uploaded = 0
 	this.TotalDownloaded.Downloaded = 0
+	this.Finished = false
+
+	//generate a peerID and allocate it
+	peerId, _ := generatePeerID()
+	this.PeerId = peerId
 	printWithColor(Red, fmt.Sprint("FILE TOTAL SIZE: ", this.FileLength))
 	printWithColor(Red, fmt.Sprint("Pieces size: ", this.PieceSize))
 	printWithColor(Red, fmt.Sprint("Total pieces: ", this.TotalPieces+1)) //need to add +1 since its an index that starts counting form 0
@@ -147,8 +158,6 @@ func (this *TorrentFileToBuild) GetPeers(firstTime bool) {
 					printWithColor(Red, err.Error())
 					return
 				}
-				//GENERATE A RANDOM ID FOR THE REQUEST
-				peerID, _ := generatePeerID()
 
 				eventType := getEventTypeForUDPTracker(firstTime, this)
 				left := (int64(this.FileLength) - this.TotalDownloaded.Downloaded)
@@ -158,7 +167,7 @@ func (this *TorrentFileToBuild) GetPeers(firstTime bool) {
 					this.InfoHash,
 					connectionIDResponse,
 					transactionIDResponse,
-					peerID,
+					this.PeerId,
 					this.TotalDownloaded.Downloaded,
 					left,
 					this.Uploaded.Uploaded,
@@ -180,13 +189,12 @@ func (this *TorrentFileToBuild) GetPeers(firstTime bool) {
 					w.Add(1)
 					go func() {
 						defer w.Done()
-						this.AddConnection(v, peerID)
+						this.AddConnection(v, this.PeerId)
 					}()
 				}
 			} else {
 				infoHash := url.QueryEscape(string(this.InfoHash))
-				peerId, _ := generatePeerID()
-				peerIdArrByte := []byte(peerId[:])
+				peerIdArrByte := []byte(this.PeerId[:])
 				port := 6881
 				//load the url query params
 				url := tracker
@@ -233,7 +241,7 @@ func (this *TorrentFileToBuild) GetPeers(firstTime bool) {
 						port := string(peersStr[i+4]) + string(peersStr[i+5])
 						portNumber := binary.BigEndian.Uint16([]byte(port))
 						fullIp := fmt.Sprint(ip, ":", portNumber)
-						this.AddConnection(fullIp, peerId)
+						this.AddConnection(fullIp, this.PeerId)
 					}()
 				}
 			}
@@ -245,7 +253,7 @@ func (this *TorrentFileToBuild) GetPeers(firstTime bool) {
 func (this *TorrentFileToBuild) pollGetPeersEveryCoupleMinutes() {
 	go func() {
 		for {
-			time.Sleep(10 * time.Second)
+			time.Sleep(50 * time.Second)
 
 			if this.allFilesAreDownloaded() {
 				this.GetPeers(false)
@@ -300,7 +308,7 @@ func (this *TorrentFileToBuild) downloadFileAsync() {
 			if v.Completed {
 				continue
 			}
-			fmt.Println("missing", fileIndex)
+
 			//get any connection that is not being currently used
 			connectionToUse := this.GetUnusedConnection(fileIndex)
 			connectionToUse.Using = true

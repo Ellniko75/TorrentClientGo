@@ -8,6 +8,14 @@ import (
 	"time"
 )
 
+type HandshakeStructure struct {
+	LengthOfProtocolmsg byte
+	PeerId              [20]byte
+	Protocol            []byte
+	Bitfield            []byte
+	InfoHash            [20]byte
+}
+
 // Connects to the peer anr requests the whole file, block by block
 func connectToPeerAndRequestWholePiece(conn *Connection, fileIndex int, torrentInfo *TorrentFileToBuild, final bool) ([]byte, error) {
 	AmountOfBlocks := torrentInfo.AmountOfBlocks
@@ -37,23 +45,22 @@ func connectToPeerAndRequestWholePiece(conn *Connection, fileIndex int, torrentI
 			wholePiece = append(wholePiece, data...)
 		}
 	}
-
 	//for all the other pieces the peers do not send that 5 bytes, so que return the whole piece
 	return wholePiece, nil
 }
-func initiatePeerConnection(ip string, infoHash []byte, peerId [20]byte) (net.Conn, map[int]bool, error) {
+func initiatePeerConnection(ip string, infoHash []byte, peerId [20]byte) (net.Conn, map[int]bool, [20]byte, error) {
 	//create the connection based on the IP
 	connection, err := createTcpConnection(ip)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, [20]byte{}, err
 	}
 	//make the handshake and get the bitfield
-	_, bitfield, err := handleHandshake(infoHash, peerId, connection)
+	peerID, bitfield, err := handleHandshake(infoHash, peerId, connection)
 	if err != nil {
-		return nil, bitfield, err
+		return nil, bitfield, [20]byte{}, err
 	}
 
-	return connection, bitfield, nil
+	return connection, bitfield, peerID, nil
 }
 
 // Creates the tcp connection and dials up with the url, for now it's hardcoded to request to the port I know its opened, since I cannot make the port be good
@@ -68,63 +75,84 @@ func createTcpConnection(ip string) (net.Conn, error) {
 	return conn, nil
 }
 
-func handleHandshake(infoHash []byte, peerID [20]byte, conn net.Conn) ([]byte, map[int]bool, error) {
-
+func createHandshakePayload(infoHash []byte, peerID [20]byte) (bytes.Buffer, error) {
 	//handle the handshake
 	var handshakeMessage bytes.Buffer
 
 	//Write the length (pstrlen)
 	if err := binary.Write(&handshakeMessage, binary.BigEndian, byte(19)); err != nil {
-		return nil, nil, createError("handleHandshake()", err.Error())
+		return handshakeMessage, createError("handleHandshake()", err.Error())
 	}
 	//Write the protocol (pstr)
 	if err := binary.Write(&handshakeMessage, binary.BigEndian, []byte("BitTorrent protocol")); err != nil {
-		return nil, nil, createError("handleHandshake()", err.Error())
+		return handshakeMessage, createError("handleHandshake()", err.Error())
 	}
 	//Write the reserved 8 bytes (reserved)
 	if err := binary.Write(&handshakeMessage, binary.BigEndian, make([]byte, 8)); err != nil {
-		return nil, nil, createError("handleHandshake()", err.Error())
+		return handshakeMessage, createError("handleHandshake()", err.Error())
 	}
 	//Write the hash (info_hash)
 	if err := binary.Write(&handshakeMessage, binary.BigEndian, infoHash); err != nil {
-		return nil, nil, createError("handleHandshake()", err.Error())
+		return handshakeMessage, createError("handleHandshake()", err.Error())
 	}
 	//Write the peerID (peer_id)
 	if err := binary.Write(&handshakeMessage, binary.BigEndian, peerID); err != nil {
-		return nil, nil, createError("handleHandshake()", err.Error())
+		return handshakeMessage, createError("handleHandshake()", err.Error())
 	}
-	//send the handshake message
-	_, err := conn.Write(handshakeMessage.Bytes())
+
+	return handshakeMessage, nil
+}
+
+func handleHandshake(infoHash []byte, peerID [20]byte, conn net.Conn) ([20]byte, map[int]bool, error) {
+	//create the handshake payload (WITHOUT THE BITFIELD)
+	handshakePayload, err := createHandshakePayload(infoHash, peerID)
 	if err != nil {
-		return nil, nil, createError("handleHandshake()", err.Error())
+		return [20]byte{}, nil, err
+	}
+
+	//send the handshake message
+	_, err = conn.Write(handshakePayload.Bytes())
+	if err != nil {
+		return [20]byte{}, nil, createError("handleHandshake()", err.Error())
 	}
 	//set the deadline for handhsake to 3 seconds
 	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
 	data := make([]byte, 2048)
 	_, err = conn.Read(data)
 	if err != nil {
-		return nil, nil, createError("handleHandshake()", err.Error())
+		return [20]byte{}, nil, createError("handleHandshake()", err.Error())
 	}
-
-	lengthOfProtocolmsg := byte(data[:1][0])
-	//messageProtocol := data[1 : 1+lengthOfProtocolmsg]
-	start := 1 + lengthOfProtocolmsg
-	//reservedResp := data[start : start+8]
-	start2 := start + 8
-	//infoHashResp := data[start2 : start2+20]
-	start3 := start2 + 20
-	//peerIdResp := data[start3 : start3+20]
-	start4 := start3 + 20
-	bitfieldResponse := data[start4:]
-	bitfieldResponseLength := binary.BigEndian.Uint32(bitfieldResponse[:4])
-	fullData := bitfieldResponse[5:(5 + bitfieldResponseLength)]
-	printWithColor(Green, fmt.Sprint("Hanshake succesful, BITFIELD: ", fullData))
-
-	BitfieldParsed := createBitfieldMap(fullData)
+	//get the handshake response information
+	handshakeParsed := parseHandshakeResponse(data)
+	printWithColor(Green, fmt.Sprint("Hanshake succesful, BITFIELD: ", handshakeParsed.Bitfield, " LENGTH:", handshakeParsed.LengthOfProtocolmsg, " from: ", conn.RemoteAddr()))
+	BitfieldParsed := createBitfieldMap(handshakeParsed.Bitfield)
 
 	//reset deadline
 	conn.SetReadDeadline(time.Time{})
-	return data, BitfieldParsed, nil
+	return handshakeParsed.PeerId, BitfieldParsed, nil
+}
+func parseHandshakeResponse(data []byte) HandshakeStructure {
+	handshakeResponse := HandshakeStructure{}
+	lengthOfProtocolmsg := byte(data[:1][0])
+	messageProtocol := data[1 : 1+lengthOfProtocolmsg]
+	start := 1 + lengthOfProtocolmsg
+	//reservedResp := data[start : start+8]
+	start2 := start + 8
+	infoHashResp := data[start2 : start2+20]
+	start3 := start2 + 20
+	peerIdResp := data[start3 : start3+20]
+	start4 := start3 + 20
+	bitfieldResponse := data[start4:]
+	bitfieldResponseLength := binary.BigEndian.Uint32(bitfieldResponse[:4])
+	bitfield := bitfieldResponse[5:(5 + bitfieldResponseLength)]
+
+	handshakeResponse.LengthOfProtocolmsg = lengthOfProtocolmsg
+	handshakeResponse.Protocol = messageProtocol
+	handshakeResponse.Bitfield = bitfield
+	handshakeResponse.PeerId = [20]byte(peerIdResp)
+	handshakeResponse.InfoHash = [20]byte(infoHashResp)
+
+	return handshakeResponse
 }
 
 func createBitfieldMap(bitfieldNetworkResponse []byte) map[int]bool {
@@ -239,6 +267,7 @@ func sendInterestedPayloadToConnection(conn net.Conn) error {
 	if err := binary.Write(&buff, binary.BigEndian, int32(1)); err != nil {
 		return createError("sendRequestPayloadToConnection() ", err.Error())
 	}
+	//INTERESTED ID
 	if err := binary.Write(&buff, binary.BigEndian, byte(2)); err != nil {
 		return createError("sendRequestPayloadToConnection() ", err.Error())
 	}
@@ -247,8 +276,36 @@ func sendInterestedPayloadToConnection(conn net.Conn) error {
 
 	return err
 }
+func sendUnchoke(conn net.Conn) error {
+	var buff bytes.Buffer
+	//Write Response Length
+	if err := binary.Write(&buff, binary.BigEndian, int32(1)); err != nil {
+		return createError("sendUnchoke() ", err.Error())
+	}
+	//write unchoke id
+	if err := binary.Write(&buff, binary.BigEndian, int32(1)); err != nil {
+		return createError("sendUnchoke() ", err.Error())
+	}
+	_, err := conn.Write(buff.Bytes())
+	return err
+}
 
 func getIdOfPeerMessage(data []byte) byte {
 	idOfMessage := data[4:5]
 	return idOfMessage[0]
+}
+func CreateHavePieceMessage(piece int32) (bytes.Buffer, error) {
+	var haveMessage bytes.Buffer
+
+	err := binary.Write(&haveMessage, binary.BigEndian, int(5))
+
+	err = binary.Write(&haveMessage, binary.BigEndian, byte(4))
+
+	err = binary.Write(&haveMessage, binary.BigEndian, piece)
+
+	if err != nil {
+		return haveMessage, err
+	}
+	return haveMessage, nil
+
 }

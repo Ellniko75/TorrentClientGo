@@ -5,14 +5,10 @@ import (
 	"log"
 	"os"
 	"os/exec"
-
 	"strings"
-
 	"torrent/pythonScripts"
 
 	"github.com/jackpal/bencode-go"
-
-	_ "net/http/pprof"
 )
 
 var Red = "\033[31m"
@@ -71,13 +67,15 @@ func main() {
 		TorrentFileToBuild.LoadPieceHashes(&torrentInfo)
 		TorrentFileToBuild.LoadTrackers(&torrentInfo)
 		TorrentFileToBuild.CalculateTotalPiecesAndBlockLength(&torrentInfo)
-		TorrentFileToBuild.writeTempFile(TorrentFileToBuild.tempFileInit())
+		TorrentFileToBuild.writeTempFile()
+		TorrentFileToBuild.UpdateCompletedPieces()
 		//go TorrentFileToBuild.shareCurrentTorrent()
+		//time.Sleep(7 * time.Second)
 		TorrentFileToBuild.GetPeers(true)
 		TorrentFileToBuild.pollGetPeersEveryCoupleMinutes()
 		TorrentFileToBuild.downloadFileAsync()
 		TorrentFileToBuild.writeFileInPieces("../output/", TorrentFileToBuild.Name, 0, TorrentFileToBuild.FileLength)
-		//orrentFileToBuild.deleteTempFile()
+		TorrentFileToBuild.deleteTempFile()
 	} else {
 		totalSizeOfFile := getTotalSizeOfMulitpleFilesTorrent(&torrentInfo)
 		TorrentFileToBuild := TorrentFileToBuild{}
@@ -85,7 +83,8 @@ func main() {
 		TorrentFileToBuild.LoadPieceHashes(&torrentInfo)
 		TorrentFileToBuild.LoadTrackers(&torrentInfo)
 		TorrentFileToBuild.LoadMetaData(totalSizeOfFile, torrentInfo.Info.PieceLength)
-		TorrentFileToBuild.writeTempFile(TorrentFileToBuild.tempFileInit())
+		TorrentFileToBuild.writeTempFile()
+		TorrentFileToBuild.UpdateCompletedPieces()
 		TorrentFileToBuild.GetPeers(true)
 		TorrentFileToBuild.pollGetPeersEveryCoupleMinutes()
 		TorrentFileToBuild.downloadFileAsync()

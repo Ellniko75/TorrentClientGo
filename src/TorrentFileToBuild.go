@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,10 +39,14 @@ type TorrentFileToBuild struct {
 		Uploaded int64
 		mu       sync.Mutex
 	}
-	Connections    Connections //slice of all peers that have the file
-	ListOfTrackers []string    //list of all the trackers
-	ListOfHashes   []Hash      //hashes for each piece of the file
-	InfoHash       []byte
+	Connections           Connections //slice of all peers that have the file
+	ListOfTrackers        []string    //list of all the trackers
+	ListOfHashes          []Hash      //hashes for each piece of the file
+	InfoHash              []byte
+	NewlyDownloadedPieces struct {
+		Pieces []int32
+		mu     sync.Mutex
+	}
 }
 
 type Hash struct {
@@ -58,7 +64,7 @@ type Connection struct {
 	Using    bool //currently using
 	Healthy  bool //if the connection has not responded we mark its healthy as false
 	Speed    int  //Speed of that connection
-
+	PeerID   [20]byte
 }
 type BencodedResponseHTTPTracker struct {
 	Interval int    `bencode:"interval"`
@@ -98,7 +104,6 @@ func (this *TorrentFileToBuild) CalculateTotalPiecesAndBlockLength(info *Torrent
 	printWithColor(Red, fmt.Sprint("Total pieces: ", this.TotalPieces+1)) //need to add +1 since its an index that starts counting form 0
 	printWithColor(Red, fmt.Sprint("Block size: ", this.BlockLength))
 	printWithColor(Red, fmt.Sprint("Amount of blocks: ", this.AmountOfBlocks))
-
 }
 
 // this is the same as CalculateTotalPiecesAndBlockLength but it receives the information separated instead of as a TorrentFileInfo pointer
@@ -270,14 +275,15 @@ func (this *TorrentFileToBuild) AddConnection(ipAndPort string, peerID [20]byte)
 	if this.isIpRepeatedAndHealthy(ipAndPort) {
 		return
 	}
-	conn, bitfield, err := initiatePeerConnection(ipAndPort, this.InfoHash, peerID)
+	conn, bitfield, remotePeerId, err := initiatePeerConnection(ipAndPort, this.InfoHash, peerID)
 	if err != nil {
 		printWithColor(Red, fmt.Sprint("Could not establish connection with ", ipAndPort))
 		return
 	}
+	fmt.Println("REMOTE PEER ID:", remotePeerId, string(remotePeerId[:]))
 	printWithColor(Green, "PEER CONNECTION ADDED SUCCESSFULLY")
 	this.Connections.Mu.Lock()
-	this.Connections.Conns = append(this.Connections.Conns, Connection{Conn: conn, Using: false, Ip: ipAndPort, Healthy: true, BitField: bitfield})
+	this.Connections.Conns = append(this.Connections.Conns, Connection{Conn: conn, Using: false, Ip: ipAndPort, Healthy: true, BitField: bitfield, PeerID: remotePeerId})
 	this.Connections.Mu.Unlock()
 }
 func (this *TorrentFileToBuild) isIpRepeatedAndHealthy(ip string) bool {
@@ -290,6 +296,7 @@ func (this *TorrentFileToBuild) isIpRepeatedAndHealthy(ip string) bool {
 	}
 	return false
 }
+
 func (this *TorrentFileToBuild) allFilesAreDownloaded() bool {
 	for _, v := range this.ListOfHashes {
 		if !v.Completed {
@@ -326,16 +333,20 @@ func (this *TorrentFileToBuild) downloadFileAsync() {
 					return
 				}
 				printWithColor(Green, fmt.Sprint("Hash matched - FILE:", fileIndex, " | IP downloaded from:", conn.Ip))
-				WriteToOkstxt(fileIndex)
 				//set completed to true - need to do it like this, because v is a copy of the value and not a reference
 				this.ListOfHashes[fileIndex].Completed = true
 				//Write to the temp file the downloaded piece
 				indexStart := this.PieceSize * fileIndex
+				//write to disk the piece of file
 				this.writeToTempFile(data, indexStart)
 				//increment the total data downloaded
 				this.TotalDownloaded.mu.Lock()
 				this.TotalDownloaded.Downloaded += int64(len(data))
 				this.TotalDownloaded.mu.Unlock()
+				//add the newly downloaded piece to an array so that goroutines can update peers on that
+				this.NewlyDownloadedPieces.mu.Lock()
+				this.NewlyDownloadedPieces.Pieces = append(this.NewlyDownloadedPieces.Pieces, int32(fileIndex))
+				this.NewlyDownloadedPieces.mu.Unlock()
 			}(connectionToUse)
 		}
 		if this.allFilesAreDownloaded() {
@@ -488,23 +499,102 @@ func randomString(n int) string {
 	return string(s)
 }
 
-func (this *TorrentFileToBuild) tempFileInit() []byte {
-	partialfileRead := make([]byte, this.FileLength)
-
-	return partialfileRead
-}
-
-func (this *TorrentFileToBuild) writeTempFile(data []byte) error {
-	err := os.WriteFile("./partial.bin", data, 0644)
+func (this *TorrentFileToBuild) tempFileInit() error {
+	var tempFile = []byte{}
+	//add the space for the whole file
+	initialPartial := make([]byte, this.FileLength)
+	//append the empty data to the tempfile the length that we need
+	tempFile = append(tempFile, initialPartial...)
+	//LAST 20 BYTES ARE THE INFOHASH
+	tempFile = append(tempFile, this.InfoHash...)
+	//write it
+	err := os.WriteFile("./partial.bin", tempFile, 0644)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
+func (this *TorrentFileToBuild) writeTempFile() error {
+	//if the partial.bin is a not exists we create it
+	_, err := os.Stat("./partial.bin")
+	if errors.Is(err, os.ErrNotExist) {
+		err = this.tempFileInit()
+		fmt.Println("PARTIAL CREATED")
+		return err
+	}
+	data, err := this.GetPartialBinInfoHash()
+	if err != nil {
+		return err
+	}
+	//if the hashes match we don't need to recreate the file
+	if reflect.DeepEqual([20]byte(data), [20]byte(this.InfoHash)) {
+		fmt.Println("Infohash stored is equal, not needed to recreate the partial.bin")
+		return nil
+	}
+
+	fmt.Println("infohashes on partial different, recreated:")
+	err = this.tempFileInit()
+	return err
+}
+func (this *TorrentFileToBuild) GetPartialBinInfoHash() ([20]byte, error) {
+	file, err := os.Open("./partial.bin")
+	defer file.Close()
+	//get the file size and move to the part where the infohash starts
+	fileStats, err := file.Stat()
+	startOfInfoHash := int64(fileStats.Size() - 20)
+	_, err = file.Seek(startOfInfoHash, 0)
+	//where we store the read data
+	data := make([]byte, 20)
+	if err != nil {
+		return [20]byte(data), err
+	}
+	file.Read(data)
+
+	return [20]byte(data), nil
+}
+
+func (this *TorrentFileToBuild) UpdateCompletedPieces() error {
+	data, err := this.GetPartialBinInfoHash()
+	if err != nil {
+		return err
+	}
+	//if the hashes match we update our completed hashes
+	if reflect.DeepEqual([20]byte(data), [20]byte(this.InfoHash)) {
+		fmt.Print("UPDATING PIECES COMPLETION")
+		var start int64 = 0
+		for i := 0; i < len(this.ListOfHashes); i++ {
+			file, err := os.Open("partial.bin")
+			if err != nil {
+				return err
+			}
+			file.Seek(start, 0)
+			data := make([]byte, this.PieceSize)
+			file.Read(data)
+			start += int64(this.PieceSize)
+
+			//if we are at the last piece we remove the extra 20 bytes that signify the infohash, since we don't want that intervining in the calculation of completed pieces
+			lastPiece := int64(this.TotalPieces+1) * int64(this.PieceSize)
+			//at the last piece check only up to its length, we don't want metadata after that interefering
+			if start == lastPiece {
+				lastPieceLength := this.FileLength - (this.TotalPieces * this.PieceSize)
+				data = data[:lastPieceLength]
+			}
+			//if that part of the piece has a NOT ZERO, we know we downloaded that piece, otherwise it would be initialized all as zeroes
+			for _, v := range data {
+				if v != 0 {
+					this.ListOfHashes[i].Completed = true
+					break
+				}
+			}
+		}
+	}
+
+	return createError("UpdateCompletedHashes()", "the hashes did not match, this sould never happen")
+}
+
 // get a byte array and write it to the specified indices
 func (this *TorrentFileToBuild) writeToTempFile(dataToWrite []byte, start int) {
-
 	file, err := os.OpenFile("partial.bin", os.O_RDWR, 0644)
 	defer file.Close()
 
@@ -551,8 +641,45 @@ func (this *TorrentFileToBuild) deleteTempFile() {
 	}
 }
 
-func (this *TorrentFileToBuild) shareCurrentTorrent() {
+// Creates a bitfield based of my current completed pieces, so i can tell people which pieces I have and don't have.
+// If I had for example the pieces 0,1,2,3,4,5,6,7  and not the piece 8,9,10,11,12,13,14,15 it would look like:
+// [1111111100000000] each bit (NOT BYTE) represents which piece i have
+func (this *TorrentFileToBuild) CurrentBitfield() []byte {
+	bitfield := []byte{}
+	bitString := ""
+	/*
+		for i := 0; i < len(this.ListOfHashes); i++ {
+			this.ListOfHashes[i].Completed = true
+		}*/
+	for i, v := range this.ListOfHashes {
+		if v.Completed {
+			bitString += "1"
+		} else {
+			bitString += "0"
+		}
+		//fill the last bitstring with zeroes at the end
+		if i == len(this.ListOfHashes)-1 {
+			lengthLeftToFillEight := 8 - len(bitString)
+			for i := 0; i < lengthLeftToFillEight; i++ {
+				bitString += "0"
+			}
+		}
+		//if we already got a byte or we are at the end we append it to the result
+		if len(bitString) == 8 || i == len(this.ListOfHashes)-1 {
+			toNumber, err := strconv.ParseUint(bitString, 2, 8)
+			if err != nil {
+				log.Println("ERROR CREATING THE CURRENT BITFIELD")
+			}
+			toByte := byte(toNumber)
+			bitfield = append(bitfield, toByte)
+			bitString = ""
+		}
 
+	}
+	return bitfield
+}
+
+func (this *TorrentFileToBuild) shareCurrentTorrent() {
 	file, err := os.Open("partial.bin")
 	if err != nil {
 		log.Println("NO SE PUDO LEER PARTIAL.BIN")
@@ -560,28 +687,124 @@ func (this *TorrentFileToBuild) shareCurrentTorrent() {
 	defer file.Close()
 
 	l, err := net.Listen("tcp", ":6881")
-	printWithColor(Green, "LISTENING FOR INCOMING CONNECTIONS")
+	printWithColor(Green, "SERVING THE FILE!!!!!!!!!!!")
 	for {
 		conn, err := l.Accept()
 		if err != nil {
 			printWithColor(Red, fmt.Sprint("ERROR EN ACEPTAR CONEXION INCOMING:", err))
 		}
-		go this.HandleConnection(conn)
+		go this.HandleIncomingHandshake(conn)
 	}
 }
-func (this *TorrentFileToBuild) HandleConnection(currentCon net.Conn) {
-	for {
-		buf := make([]byte, 1000)
-		n, err := currentCon.Read(buf)
-		if err != nil {
-			printWithColor(Red, fmt.Sprint("Error on handling incoming connection:", err))
-		}
-		if n == 0 {
-			printWithColor(Green, "0 BYTES RECEIVED")
-		}
-		printWithColor(Green, fmt.Sprint("RECEIVED:", buf[:n]))
-		protocolMsgLength := binary.BigEndian.Uint16(buf[:1])
-		protocolMessage := buf[1:protocolMsgLength]
-		fmt.Println("PROTOCOL MESSAGE:", protocolMessage)
+
+func (this *TorrentFileToBuild) HandleIncomingHandshake(currentCon net.Conn) {
+	buf := make([]byte, 10000)
+	n, err := currentCon.Read(buf)
+	if err != nil {
+		printWithColor(Red, fmt.Sprint("Error on handling incoming connection:", err))
+		return
 	}
+	if n < 19 {
+		fmt.Println("Messagge too short", buf[:n])
+		return
+	}
+	printWithColor(Green, fmt.Sprint("HandleIncomingHandshake(): ", currentCon.RemoteAddr(), buf[:n]))
+	protocolMsgLength := byte(buf[:1][0])
+	if protocolMsgLength != 19 {
+		printWithColor(Red, "protocol message length is not 19")
+		return
+	}
+	handshakeParsed := parseHandshakeResponse(buf)
+	if string(handshakeParsed.Protocol) == "Bitorrent protocol" {
+		printWithColor(Green, " ES BITORRENT PROTOCOL XDD")
+	}
+	if reflect.DeepEqual(handshakeParsed.InfoHash, [20]byte(this.InfoHash)) == false {
+		printWithColor(Red, fmt.Sprint("The infohash received does not match my own, on HandleIncomingHandshake()", currentCon.RemoteAddr(), this.InfoHash, handshakeParsed.InfoHash))
+		return
+	}
+
+	printWithColor(Green, fmt.Sprint("HASH OF INCOMING CONNECTION MATCHED, handhsake gotten: ", buf[:n]))
+	//create a handshakePayload to respond with
+	handshakePayload, err := createHandshakePayload(this.InfoHash, this.PeerId)
+	if err != nil {
+		printWithColor(Red, fmt.Sprint("ERROR CREATING THE HANDSHAKE PAYLOAD ON HandleIncomingHandshake()", err))
+		return
+	}
+	//add the bitfield information
+	bitfield := this.CurrentBitfield()
+	fmt.Println("bitfield:", bitfield)
+	bitfieldLength := uint32(len(bitfield))
+	err = binary.Write(&handshakePayload, binary.BigEndian, bitfieldLength)
+	err = binary.Write(&handshakePayload, binary.BigEndian, bitfield)
+	if err != nil {
+		printWithColor(Red, fmt.Sprint("ERROR CREATING THE HANDSHAKE PAYLOAD ON HandleIncomingHandshake()", err))
+		return
+	}
+	//Write the handshake to the incoming connection
+	_, err = currentCon.Write(handshakePayload.Bytes())
+	if err != nil {
+		printWithColor(Red, fmt.Sprint("ERROR WRITING THE HANDSHAKE MESSAGE TO AN INCOMING", err))
+		return
+	}
+	//after handling the handshake, start handling requests and updating the peers on newly downloaded pieces
+	go this.HandleRequests(currentCon)
+
+}
+func (this *TorrentFileToBuild) HandleRequests(currentCon net.Conn) {
+	for {
+		resp := make([]byte, 10000)
+		n, err := currentCon.Read(resp)
+		if err != nil {
+			log.Println("error on HandleRequests", err, " on conn: ", currentCon.RemoteAddr())
+			return
+		}
+		fmt.Println("HandleRequests():", currentCon.RemoteAddr(), resp[:n])
+
+		//if its a piece have message, add it
+		err = this.AddPieceHave(resp[:n], currentCon)
+		if err != nil {
+			printWithColor(Red, fmt.Sprint("error on HANDLEREQUESTS() AddPieceHave()", err))
+			return
+		}
+		//If it is an interested message send the unchoke
+		err = this.HandleUnchoke(resp[:n], currentCon)
+		if err != nil {
+			printWithColor(Red, fmt.Sprint("error on HANDLEREQUESTS() HandleUnchoke()", err))
+			return
+		}
+
+	}
+}
+func (this *TorrentFileToBuild) HandleUnchoke(data []byte, conn net.Conn) error {
+	isInterested := len(data) == 5 && byte(data[4:5][0]) == 2
+	if !isInterested {
+		return nil
+	}
+	err := sendUnchoke(conn)
+	return err
+}
+
+func (this *TorrentFileToBuild) AddPieceHave(data []byte, conn net.Conn) error {
+	if len(data) == 9 && byte(data[4:5][0]) == 4 {
+		IpAddress := strings.Split(conn.RemoteAddr().String(), ":")[0]
+		NewPiece := int(binary.BigEndian.Uint32(data[5:]))
+
+		conn, err := this.SearchConnection(IpAddress)
+		if err != nil {
+			return err
+		}
+		fmt.Println("ADDED NEW PIECE TO BITFIELD IN ADDPIECEHAVE()")
+		conn.BitField[NewPiece] = true
+	}
+	return nil
+}
+
+func (this *TorrentFileToBuild) SearchConnection(ipRemote string) (Connection, error) {
+	for i := 0; i < len(this.Connections.Conns); i++ {
+		ip := strings.Split(this.Connections.Conns[i].Ip, ":")[0]
+		if ip == ipRemote {
+			return this.Connections.Conns[i], nil
+		}
+	}
+	return Connection{}, createError("SearchConnection()", "DIDNT FIND A CONNECTION MATCHING THE IP")
 }

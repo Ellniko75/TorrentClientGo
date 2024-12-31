@@ -117,13 +117,17 @@ func handleHandshake(infoHash []byte, peerID [20]byte, conn net.Conn) ([20]byte,
 	}
 	//set the deadline for handhsake to 3 seconds
 	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	data := make([]byte, 2048)
-	_, err = conn.Read(data)
+	data := make([]byte, 65535)
+	n, err := conn.Read(data)
 	if err != nil {
 		return [20]byte{}, nil, createError("handleHandshake()", err.Error())
 	}
 	//get the handshake response information
-	handshakeParsed := parseHandshakeResponse(data)
+	handshakeParsed, err := parseHandshakeResponse(data[:n])
+	if err != nil {
+		return [20]byte{}, nil, err
+	}
+
 	printWithColor(Green, fmt.Sprint("Hanshake succesful, BITFIELD: ", handshakeParsed.Bitfield, " LENGTH:", handshakeParsed.LengthOfProtocolmsg, " from: ", conn.RemoteAddr()))
 	BitfieldParsed := createBitfieldMap(handshakeParsed.Bitfield)
 
@@ -131,9 +135,13 @@ func handleHandshake(infoHash []byte, peerID [20]byte, conn net.Conn) ([20]byte,
 	conn.SetReadDeadline(time.Time{})
 	return handshakeParsed.PeerId, BitfieldParsed, nil
 }
-func parseHandshakeResponse(data []byte) HandshakeStructure {
+func parseHandshakeResponse(data []byte) (HandshakeStructure, error) {
+
 	handshakeResponse := HandshakeStructure{}
 	lengthOfProtocolmsg := byte(data[:1][0])
+	if lengthOfProtocolmsg != 19 {
+		return handshakeResponse, createError("parseHandshakeResponse", "PROTOCOL MISMATCH ON HANDSHAKE")
+	}
 	messageProtocol := data[1 : 1+lengthOfProtocolmsg]
 	start := 1 + lengthOfProtocolmsg
 	//reservedResp := data[start : start+8]
@@ -152,7 +160,7 @@ func parseHandshakeResponse(data []byte) HandshakeStructure {
 	handshakeResponse.PeerId = [20]byte(peerIdResp)
 	handshakeResponse.InfoHash = [20]byte(infoHashResp)
 
-	return handshakeResponse
+	return handshakeResponse, nil
 }
 
 func createBitfieldMap(bitfieldNetworkResponse []byte) map[int]bool {

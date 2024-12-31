@@ -38,7 +38,7 @@ type TorrentFileInfo struct {
 
 func main() {
 	ResetOksAndErrors()
-	torrentPath := "../torrents/xoka.torrent"
+	torrentPath := "../torrents/dragon.torrent"
 
 	file, err := os.Open(torrentPath)
 	defer file.Close()
@@ -56,9 +56,6 @@ func main() {
 	hash, err := pythonScripts.GetInfoHash(torrentPath)
 	printWithColor(Blue, fmt.Sprint("HASH: ", hash))
 
-	//sigChan := make(chan os.Signal, 1)
-	//signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-
 	torrentIsSingleFile := torrentInfo.Info.Length > 0
 	if torrentIsSingleFile {
 		TorrentFileToBuild := TorrentFileToBuild{}
@@ -75,7 +72,7 @@ func main() {
 		TorrentFileToBuild.pollGetPeersEveryCoupleMinutes()
 		TorrentFileToBuild.downloadFileAsync()
 		TorrentFileToBuild.writeFileInPieces("../output/", TorrentFileToBuild.Name, 0, TorrentFileToBuild.FileLength)
-		TorrentFileToBuild.deleteTempFile()
+		//TorrentFileToBuild.deleteTempFile()
 	} else {
 		totalSizeOfFile := getTotalSizeOfMulitpleFilesTorrent(&torrentInfo)
 		TorrentFileToBuild := TorrentFileToBuild{}
@@ -98,7 +95,7 @@ func main() {
 		}
 		TorrentFileToBuild.deleteTempFile()
 	}
-	//<-sigChan
+
 }
 
 func getHexHash(torrentPath string) (string, error) {

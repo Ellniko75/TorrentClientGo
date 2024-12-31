@@ -166,6 +166,7 @@ func (this *TorrentFileToBuild) GetPeers(firstTime bool) {
 
 				eventType := getEventTypeForUDPTracker(firstTime, this)
 				left := (int64(this.FileLength) - this.TotalDownloaded.Downloaded)
+
 				//GET ALL THE PEERS THAT HAVE THE FILE FROM THE TRACKERS
 				trackerAnnounceResponse, _, err := getPeersFromUdp(
 					conn,
@@ -211,10 +212,13 @@ func (this *TorrentFileToBuild) GetPeers(firstTime bool) {
 				left := this.FileLength - int(this.TotalDownloaded.Downloaded)
 				url += fmt.Sprint("&left=", left)
 				url += fmt.Sprint("&uploaded=", this.Uploaded.Uploaded)
-				if firstTime {
-					event := "started"
+				//only send the event when we either started downloading or we finished
+				if firstTime || this.TotalDownloaded.Downloaded == int64(this.FileLength) {
+					event := ""
 					if this.TotalDownloaded.Downloaded == int64(this.FileLength) {
 						event = "completed"
+					} else {
+						event = "started"
 					}
 					url += fmt.Sprint("&event=", event)
 				}
@@ -223,7 +227,6 @@ func (this *TorrentFileToBuild) GetPeers(firstTime bool) {
 					Timeout: 2 * time.Second,
 				}
 				resp, err := httpClient.Get(url)
-				printWithColor(Yellow, "HTTP TRACKER RESPONDED")
 				if err != nil {
 					log.Println(err)
 					return
@@ -246,6 +249,7 @@ func (this *TorrentFileToBuild) GetPeers(firstTime bool) {
 						port := string(peersStr[i+4]) + string(peersStr[i+5])
 						portNumber := binary.BigEndian.Uint16([]byte(port))
 						fullIp := fmt.Sprint(ip, ":", portNumber)
+						fmt.Println("HTTP TRACKER", " IP GOTTEN: ", fullIp)
 						this.AddConnection(fullIp, this.PeerId)
 					}()
 				}
@@ -561,7 +565,7 @@ func (this *TorrentFileToBuild) UpdateCompletedPieces() error {
 	}
 	//if the hashes match we update our completed hashes
 	if reflect.DeepEqual([20]byte(data), [20]byte(this.InfoHash)) {
-		fmt.Print("UPDATING PIECES COMPLETION")
+		fmt.Println("UPDATING PIECES COMPLETION")
 		var start int64 = 0
 		for i := 0; i < len(this.ListOfHashes); i++ {
 			file, err := os.Open("partial.bin")
@@ -647,10 +651,7 @@ func (this *TorrentFileToBuild) deleteTempFile() {
 func (this *TorrentFileToBuild) CurrentBitfield() []byte {
 	bitfield := []byte{}
 	bitString := ""
-	/*
-		for i := 0; i < len(this.ListOfHashes); i++ {
-			this.ListOfHashes[i].Completed = true
-		}*/
+
 	for i, v := range this.ListOfHashes {
 		if v.Completed {
 			bitString += "1"
@@ -714,7 +715,11 @@ func (this *TorrentFileToBuild) HandleIncomingHandshake(currentCon net.Conn) {
 		printWithColor(Red, "protocol message length is not 19")
 		return
 	}
-	handshakeParsed := parseHandshakeResponse(buf)
+	handshakeParsed, err := parseHandshakeResponse(buf)
+	if err != nil {
+		log.Println("HANDLEINCOMINGHANDSHAKE()", err)
+	}
+
 	if string(handshakeParsed.Protocol) == "Bitorrent protocol" {
 		printWithColor(Green, " ES BITORRENT PROTOCOL XDD")
 	}

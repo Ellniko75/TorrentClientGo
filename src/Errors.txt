@@ -1,0 +1,21 @@
+Error on index: Error with IP:5.79.73.232:56933Error on requestBlock() on conn.Write():EOF on ip: 5.79.73.232:56933
+Error on index: Error with IP:5.79.73.232:56933Error on requestBlock() on conn.Write():EOF on ip: 5.79.73.232:56933
+Error on index: Error with IP:5.79.73.232:56933Error on requestBlock() on conn.Write():EOF on ip: 5.79.73.232:56933
+Error on index: Error with IP:5.79.73.232:56933Error on requestBlock() on conn.Write():EOF on ip: 5.79.73.232:56933
+Error on index: Error with IP:90.70.43.247:49178Error on requestBlock() on conn.Write():EOF on ip: 90.70.43.247:49178
+Error on index: Error with IP:90.70.43.247:49178Error on requestBlock() on conn.Write():EOF on ip: 90.70.43.247:49178
+Error on index: Error with IP:90.70.43.247:49178Error on requestBlock() on conn.Write():EOF on ip: 90.70.43.247:49178
+Error on index: Error with IP:90.70.43.247:49178Error on requestBlock() on conn.Write():EOF on ip: 90.70.43.247:49178
+Error on index: Error with IP:90.70.43.247:49178Error on requestBlock() on conn.Write():EOF on ip: 90.70.43.247:49178
+Error on index: Error with IP:186.48.164.61:12345Error on askForFilePiece():THE HASH DIDN'T MATCH, FILE: 50 FROM IP: 186.48.164.61:12345
+Error on index: Error with IP:186.48.164.61:12345Error on askForFilePiece():THE HASH DIDN'T MATCH, FILE: 54 FROM IP: 186.48.164.61:12345
+Error on index: Error with IP:186.48.164.61:12345Error on askForFilePiece():THE HASH DIDN'T MATCH, FILE: 55 FROM IP: 186.48.164.61:12345
+Error on index: Error with IP:186.48.164.61:12345Error on askForFilePiece():THE HASH DIDN'T MATCH, FILE: 65 FROM IP: 186.48.164.61:12345
+Error on index: Error with IP:173.249.217.7:50942Error on askForFilePiece():THE HASH DIDN'T MATCH, FILE: 16 FROM IP: 173.249.217.7:50942
+Error on index: Error with IP:90.70.43.247:49178Error on requestBlock() on conn.Write():EOF on ip: 90.70.43.247:49178
+Error on index: Error with IP:90.70.43.247:49178Error on requestBlock() on conn.Write():EOF on ip: 90.70.43.247:49178
+Error on index: Error with IP:212.92.104.251:62684Error on askForFilePiece():THE HASH DIDN'T MATCH, FILE: 97 FROM IP: 212.92.104.251:62684
+Error on index: Error with IP:72.21.17.73:12951Error on requestBlock() on conn.Write():EOF on ip: 72.21.17.73:12951
+Error on index: Error with IP:121.99.105.44:57519Error on requestBlock() on conn.Write():read tcp 192.168.1.51:53749->121.99.105.44:57519: wsarecv: An existing connection was forcibly closed by the remote host. on ip: 121.99.105.44:57519
+Error on index: Error with IP:191.101.157.192:48824Error on requestBlock() on conn.Write():EOF on ip: 191.101.157.192:48824
+Error on index: Error with IP:85.195.210.144:14721Error on requestBlock() on conn.Write():EOF on ip: 85.195.210.144:14721
